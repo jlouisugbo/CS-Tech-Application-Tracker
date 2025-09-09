@@ -1,0 +1,33 @@
+name: Scrape Internships Every 30 Minutes
+
+on:
+  schedule:
+    # Runs every 30 minutes
+    - cron: '*/30 * * * *'
+  workflow_dispatch: # Allows manual trigger
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Scraper API
+        run: |
+          response=$(curl -s -w "\n%{http_code}" -X POST https://your-app.vercel.app/api/scrape \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json")
+          
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | head -n -1)
+          
+          echo "HTTP Status: $http_code"
+          echo "Response: $body"
+          
+          if [ "$http_code" -eq 200 ]; then
+            echo "✅ Scraper succeeded"
+          else
+            echo "❌ Scraper failed with status $http_code"
+            exit 1
+          fi
+
+      - name: Log Completion
+        run: echo "Scraper run completed at $(date)"

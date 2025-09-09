@@ -9,27 +9,55 @@ interface RefreshInfo {
   lastRun: Date | null;
   status: 'idle' | 'running' | 'success' | 'error';
   count: number;
-  nextRun?: Date;
+  nextUpdate: string;
 }
 
 export function RefreshStatus({ className = '' }: RefreshStatusProps) {
   const [refreshInfo, setRefreshInfo] = useState<RefreshInfo>({
     lastRun: null,
     status: 'idle',
-    count: 0
+    count: 0,
+    nextUpdate: 'Unknown'
   });
 
   useEffect(() => {
-    // Simulate getting refresh status from API or localStorage
-    // In a real implementation, this would fetch from your backend
-    const mockRefreshData = {
-      lastRun: new Date(Date.now() - 1000 * 60 * 15), // 15 minutes ago
-      status: 'success' as const,
-      count: 623,
-      nextRun: new Date(Date.now() + 1000 * 60 * 15) // 15 minutes from now
+    // Fetch real status from API
+    const fetchStatus = async () => {
+      try {
+        const response = await fetch('/api/status');
+        const data = await response.json();
+        
+        if (response.ok) {
+          setRefreshInfo({
+            lastRun: data.lastUpdated ? new Date(data.lastUpdated) : null,
+            status: data.isRecent ? 'success' : 'idle',
+            count: data.internshipsFound || 0,
+            nextUpdate: data.nextUpdate || 'Unknown'
+          });
+        } else {
+          setRefreshInfo({
+            lastRun: null,
+            status: 'error',
+            count: 0,
+            nextUpdate: 'Unknown'
+          });
+        }
+      } catch (error) {
+        console.error('Failed to fetch status:', error);
+        setRefreshInfo({
+          lastRun: null,
+          status: 'error',
+          count: 0,
+          nextUpdate: 'Unknown'
+        });
+      }
     };
+
+    fetchStatus();
     
-    setRefreshInfo(mockRefreshData);
+    // Refresh status every minute
+    const interval = setInterval(fetchStatus, 60000);
+    return () => clearInterval(interval);
   }, []);
 
   const getTimeAgo = (date: Date | null) => {
@@ -100,7 +128,7 @@ export function RefreshStatus({ className = '' }: RefreshStatusProps) {
         </div>
         {refreshInfo.status === 'success' && (
           <span className="text-xs text-gray-400">
-            Next sync in ~{Math.ceil((refreshInfo.nextRun!.getTime() - new Date().getTime()) / (1000 * 60))}m
+            Next sync in {refreshInfo.nextUpdate}
           </span>
         )}
       </div>

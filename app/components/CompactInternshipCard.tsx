@@ -3,6 +3,7 @@ import { MapPin, Calendar, ExternalLink, Building2, GraduationCap, Flag, Shield,
 import type { Internship, SavedInternship } from '../types';
 import { useAuth, useIsSaved, useSavedInternships } from '../lib/hooks';
 import { LocationsModal } from './LocationsModal';
+import { CompanyAvatar } from './CompanyAvatar';
 
 interface CompactInternshipCardProps {
   internship: Internship;
@@ -99,11 +100,9 @@ export const CompactInternshipCard = memo(function CompactInternshipCard({ inter
         internship.is_closed ? 'opacity-60 bg-gray-100' : isEven ? 'bg-white' : 'bg-gray-50'
       } rounded-lg border border-gray-200 p-3 hover:shadow-md transition-all duration-200 hover:border-yellow-300 group flex flex-col h-full`}>
         
-        {/* Header with company initial and action button */}
+        {/* Header with company avatar and action button */}
         <div className="flex items-center justify-between mb-2">
-          <div className="w-8 h-8 bg-gradient-to-br from-yellow-500 to-yellow-600 rounded-md flex items-center justify-center">
-            <span className="text-white font-bold text-xs">{internship.company.charAt(0)}</span>
-          </div>
+          <CompanyAvatar company={internship.company} size="md" />
           
           <div className="flex space-x-1">
             {user && (
@@ -217,8 +216,8 @@ export const CompactInternshipCard = memo(function CompactInternshipCard({ inter
       
       <div className="flex items-center space-x-4">
         {/* Company logo */}
-        <div className="flex-shrink-0 w-8 h-8 bg-gradient-to-br from-yellow-500 to-yellow-600 rounded-md flex items-center justify-center">
-          <span className="text-white font-bold text-xs">{internship.company.charAt(0)}</span>
+        <div className="flex-shrink-0">
+          <CompanyAvatar company={internship.company} size="md" />
         </div>
 
         {/* Main content - flexible layout */}

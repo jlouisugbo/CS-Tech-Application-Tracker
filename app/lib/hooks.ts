@@ -17,16 +17,18 @@ export function useInternships(filters: FilterState) {
         setError(null)
 
         // Fetch from Supabase database
-        let query = supabase
+        const { data, error } = await supabase
           .from('internships')
           .select('*')
           .eq('is_active', true)
+          .order('created_at', { ascending: false })
 
-        const { data, error: dbError } = await query
-
-        if (dbError) {
+        let filtered: any[] = []
+        
+        if (error) {
+          console.error('Error fetching internships:', error)
           // Fallback to sample data if database fails
-          console.warn('Database fetch failed, using sample data:', dbError.message)
+          console.log('Falling back to sample data')
           const formattedInternships = sampleData.internships.map((internship, index) => ({
             ...internship,
             id: `sample_${index}`,
@@ -34,14 +36,13 @@ export function useInternships(filters: FilterState) {
             last_seen: new Date().toISOString(),
             created_at: new Date().toISOString(),
           }))
-          setInternships(formattedInternships)
-          return
+          filtered = formattedInternships
+        } else {
+          console.log(`Successfully loaded ${data?.length || 0} internships from database`)
+          filtered = data || []
         }
 
-        let filtered = data || []
-
         // Apply client-side filters
-
         if (filters.category && filters.category !== 'All') {
           filtered = filtered.filter(i => i.category === filters.category)
         }
@@ -74,33 +75,39 @@ export function useInternships(filters: FilterState) {
           filtered = filtered.filter(i => i.date_posted === filters.date_posted)
         }
 
-        // Apply sorting
+        // Apply sorting with priority for open internships
         filtered.sort((a, b) => {
+          // First priority: Open internships come before closed ones
+          if (a.is_closed !== b.is_closed) {
+            return a.is_closed ? 1 : -1; // Open (false) comes first
+          }
+          
+          // Second priority: Apply user-selected sorting
           switch (filters.sort_by) {
             case 'date_newest':
               // Sort by date posted (newest first) - parse "Sep 02" format
-              const dateA = new Date(`${a.date_posted} 2025`).getTime()
-              const dateB = new Date(`${b.date_posted} 2025`).getTime()
-              return dateB - dateA
+              const dateA = new Date(`${a.date_posted} 2025`).getTime();
+              const dateB = new Date(`${b.date_posted} 2025`).getTime();
+              return dateB - dateA;
             case 'date_oldest':
-              const dateA2 = new Date(`${a.date_posted} 2025`).getTime()
-              const dateB2 = new Date(`${b.date_posted} 2025`).getTime()
-              return dateA2 - dateB2
+              const dateA2 = new Date(`${a.date_posted} 2025`).getTime();
+              const dateB2 = new Date(`${b.date_posted} 2025`).getTime();
+              return dateA2 - dateB2;
             case 'company_az':
-              return a.company.localeCompare(b.company)
+              return a.company.localeCompare(b.company);
             case 'company_za':
-              return b.company.localeCompare(a.company)
+              return b.company.localeCompare(a.company);
             default:
-              return 0
+              return 0;
           }
-        })
+        });
 
-        setInternships(filtered)
+        setInternships(filtered);
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to fetch internships')
-        setInternships([])
+        setError(err instanceof Error ? err.message : 'Failed to fetch internships');
+        setInternships([]);
       } finally {
-        setLoading(false)
+        setLoading(false);
       }
     }
 

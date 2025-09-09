@@ -1,0 +1,18 @@
+{
+  "name": "internship-scraper-cron",
+  "version": "1.0.0",
+  "description": "Lightweight cron service for internship scraping",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node index.js"
+  },
+  "dependencies": {
+    "node-cron": "^3.0.2",
+    "node-fetch": "^2.7.0",
+    "express": "^4.18.2"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}

@@ -15,6 +15,12 @@ def load_env_file():
                     key, value = line.strip().split('=', 1)
                     os.environ[key] = value
 
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+print("SUPABASE_URL:", SUPABASE_URL)
+print("SUPABASE_KEY length:", len(SUPABASE_KEY))
+
 # Load environment variables
 load_env_file()
 
