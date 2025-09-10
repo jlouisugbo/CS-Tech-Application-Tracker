@@ -610,28 +610,8 @@ export function useFilterOptions() {
           .eq('is_active', true)
 
         if (error || !data) {
-          // Fallback to sample data
-          const uniqueCompanies = new Set<string>()
-          const uniqueLocations = new Set<string>()
-          const uniqueDates = new Set<string>()
-
-          sampleData.internships.forEach((internship) => {
-            uniqueCompanies.add(internship.company)
-            
-            // Add each location
-            internship.locations.forEach((location) => {
-              if (location.trim() && !location.includes('locations')) { // Filter out "X locations" entries
-                uniqueLocations.add(location.trim())
-              }
-            })
-            
-            uniqueDates.add(internship.date_posted)
-          })
-
-          // Sort and set options
-          setCompanies(['All', ...Array.from(uniqueCompanies).sort()])
-          setLocations(['All', ...Array.from(uniqueLocations).sort()])
-          setDatePosted(['All', ...Array.from(uniqueDates).sort()])
+          console.error('Error fetching filter options:', error)
+          // Keep default values
           return
         }
 
