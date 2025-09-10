@@ -9,25 +9,51 @@ on:
 jobs:
   scrape:
     runs-on: ubuntu-latest
+    timeout-minutes: 15 # Add timeout to prevent long-running jobs
     steps:
+      - name: Validate Environment Variables
+        run: |
+          if [ -z "${{ secrets.VERCEL_APP_URL }}" ]; then
+            echo "❌ VERCEL_APP_URL secret is not set"
+            exit 1
+          fi
+          if [ -z "${{ secrets.CRON_SECRET }}" ]; then
+            echo "❌ CRON_SECRET secret is not set"
+            exit 1
+          fi
+          echo "✅ Environment variables validated"
+          echo "App URL: ${{ secrets.VERCEL_APP_URL }}"
+
       - name: Trigger Scraper API
         run: |
-          response=$(curl -s -w "\n%{http_code}" -X POST ${{ secrets.VERCEL_APP_URL }}/api/scrape \
+          echo "🔄 Starting scraper at $(date)"
+          echo "📡 Calling: ${{ secrets.VERCEL_APP_URL }}/api/scrape"
+          
+          response=$(curl -s -w "\n%{http_code}" -X POST "${{ secrets.VERCEL_APP_URL }}/api/scrape" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
-            -H "Content-Type: application/json")
+            -H "Content-Type: application/json" \
+            --max-time 600 --retry 2 --retry-delay 30)
           
           http_code=$(echo "$response" | tail -n1)
           body=$(echo "$response" | head -n -1)
           
-          echo "HTTP Status: $http_code"
-          echo "Response: $body"
+          echo "📊 HTTP Status: $http_code"
+          echo "📄 Response Body: $body"
           
           if [ "$http_code" -eq 200 ]; then
-            echo "✅ Scraper succeeded"
+            echo "✅ Scraper succeeded!"
+            # Parse response for internship count if available
+            if echo "$body" | grep -q '"internships"'; then
+              count=$(echo "$body" | grep -o '"internships":[0-9]*' | grep -o '[0-9]*')
+              echo "📈 Processed $count internships"
+            fi
           else
             echo "❌ Scraper failed with status $http_code"
+            echo "💬 Error details: $body"
             exit 1
           fi
 
       - name: Log Completion
-        run: echo "Scraper run completed at $(date)"
+        run: |
+          echo "✅ Scraper run completed successfully at $(date)"
+          echo "🔄 Next run in 30 minutes"

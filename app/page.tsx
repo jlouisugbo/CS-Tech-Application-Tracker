@@ -8,6 +8,7 @@ import { CompactInternshipCard } from './components/CompactInternshipCard';
 import { CompanyGroupView } from './components/CompanyGroupView';
 import { RefreshStatus } from './components/RefreshStatus';
 import { Pagination } from './components/Pagination';
+import { Footer } from './components/Footer';
 import { useInternships, useAuth, useFilterOptions } from './lib/hooks';
 import type { FilterState } from './types';
 
@@ -275,6 +276,8 @@ export default function HomePage() {
           </>
         )}
       </div>
+      
+      <Footer />
     </div>
   );
 }

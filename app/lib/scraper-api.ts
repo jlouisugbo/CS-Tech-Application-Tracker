@@ -7,37 +7,118 @@ interface ScraperResult {
   updated?: number;
   added?: number;
   error?: string;
+  sources?: SourceResult[];
 }
 
+interface SourceResult {
+  name: string;
+  success: boolean;
+  internshipsFound: number;
+  error?: string;
+}
+
+interface InternshipSource {
+  name: string;
+  url: string;
+  priority: number;
+  parser: (content: string) => any[];
+}
+
+// Define our sources
+const INTERNSHIP_SOURCES: InternshipSource[] = [
+  {
+    name: 'github-primary',
+    url: 'https://raw.githubusercontent.com/vanshb03/Summer2026-Internships/main/README.md',
+    priority: 1,
+    parser: parseInternshipsFromMarkdown
+  },
+  {
+    name: 'simplify-jobs',
+    url: 'https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/refs/heads/dev/README.md',
+    priority: 2,
+    parser: parseSimplifyJobsMarkdown
+  }
+];
+
 export async function runScraperAPI(): Promise<ScraperResult> {
+  const startTime = new Date();
+  const runId = `multi_${Date.now()}`;
+  const sources: SourceResult[] = [];
+  let allInternships: any[] = [];
+  
   try {
-    console.log('🔄 Fetching latest internships from GitHub...');
+    console.log('🔄 Starting multi-source internship scraping...');
     
-    // Fetch the live README from GitHub
-    const response = await fetch('https://raw.githubusercontent.com/vanshb03/Summer2026-Internships/main/README.md');
+    // Fetch from all sources in parallel
+    const sourceResults = await Promise.allSettled(
+      INTERNSHIP_SOURCES.map(async (source) => {
+        console.log(`📡 Fetching from ${source.name}...`);
+        
+        try {
+          const response = await fetch(source.url);
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          }
+          
+          const content = await response.text();
+          console.log(`📖 Parsing content from ${source.name}...`);
+          
+          const internships = source.parser(content);
+          console.log(`✅ Found ${internships.length} internships from ${source.name}`);
+          
+          // Add source metadata to each internship
+          const sourceInternships = internships.map((internship: any, index: number) => ({
+            ...internship,
+            source: source.name,
+            source_priority: source.priority,
+            source_index: index
+          }));
+          
+          sources.push({
+            name: source.name,
+            success: true,
+            internshipsFound: internships.length
+          });
+          
+          return sourceInternships;
+          
+        } catch (error) {
+          console.error(`❌ Error fetching ${source.name}:`, error);
+          sources.push({
+            name: source.name,
+            success: false,
+            internshipsFound: 0,
+            error: error instanceof Error ? error.message : 'Unknown error'
+          });
+          return [];
+        }
+      })
+    );
     
-    if (!response.ok) {
-      throw new Error(`GitHub fetch failed: ${response.status}`);
+    // Combine successful results
+    sourceResults.forEach((result) => {
+      if (result.status === 'fulfilled') {
+        allInternships.push(...result.value);
+      }
+    });
+    
+    if (allInternships.length === 0) {
+      throw new Error('No internships found from any source');
     }
     
-    const markdownContent = await response.text();
-    console.log('📖 Parsing GitHub README...');
+    console.log(`📊 Total internships before deduplication: ${allInternships.length}`);
     
-    // Parse internships from the markdown table
-    let internships = parseInternshipsFromMarkdown(markdownContent);
+    // Deduplicate internships (primary source wins)
+    const deduplicatedInternships = deduplicateInternships(allInternships);
+    console.log(`📊 Total internships after deduplication: ${deduplicatedInternships.length}`);
     
-    if (internships.length === 0) {
-      return { success: false, error: 'No internships found in GitHub README' };
-    }
-
+    // Check application links for closed internships
     console.log('🔗 Checking application links for closed internships...');
-    // Check application links to detect closed internships (sample a few)
-    internships = await checkApplicationLinks(internships);
-
-    // Add IDs and ensure database compatibility
-    internships = internships.map((internship: any, index: number) => {
+    const checkedInternships = await checkApplicationLinks(deduplicatedInternships);
+    
+    // Format for database insertion
+    const finalInternships = checkedInternships.map((internship: any, index: number) => {
       const now = new Date().toISOString();
-      // Only include fields that exist in database schema
       return {
         id: `${internship.company.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${internship.role.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${index}`,
         company: internship.company,
@@ -52,12 +133,11 @@ export async function runScraperAPI(): Promise<ScraperResult> {
         is_freshman_friendly: internship.is_freshman_friendly || false,
         is_closed: internship.is_closed || false,
         is_active: true,
-        created_at: now,
-        updated_at: now
+        source: internship.source,
+        last_seen: now,
+        created_at: now
       };
     });
-    
-    console.log(`📊 Found ${internships.length} internships, updating database...`);
     
     // Use Supabase admin client for server-side operations
     if (!supabaseAdmin) {
@@ -69,7 +149,7 @@ export async function runScraperAPI(): Promise<ScraperResult> {
     const { error: deleteError } = await supabaseAdmin
       .from('internships')
       .delete()
-      .neq('id', ''); // Delete all records (neq with empty string matches all)
+      .neq('id', '');
     
     if (deleteError) {
       console.warn('Warning: Could not clear existing data:', deleteError.message);
@@ -78,29 +158,45 @@ export async function runScraperAPI(): Promise<ScraperResult> {
     }
     
     // Insert fresh internships
-    const { data, error } = await supabaseAdmin
+    const { error } = await supabaseAdmin
       .from('internships')
-      .insert(internships);
+      .insert(finalInternships);
     
     if (error) {
       throw new Error(`Database update failed: ${error.message}`);
     }
     
     // Log the scrape run
-    await supabaseAdmin.from('scrape_logs').insert({
-      run_id: `vercel_${Date.now()}`,
-      status: 'success',
-      internships_found: internships.length,
-      internships_added: internships.length, // Simplified for now
-      internships_updated: 0,
-      completed_at: new Date().toISOString()
-    });
+    try {
+      const { error: logError } = await supabaseAdmin.from('scrape_logs').insert({
+        run_id: runId,
+        status: 'success',
+        internships_found: finalInternships.length,
+        internships_added: finalInternships.length,
+        internships_updated: 0,
+        completed_at: new Date().toISOString(),
+        source: 'multi-source',
+        duration_ms: Date.now() - startTime.getTime(),
+        sources_data: JSON.stringify(sources)
+      });
+      
+      if (logError) {
+        console.warn('Failed to log scrape run:', logError.message);
+      } else {
+        console.log('✅ Scrape run logged successfully');
+      }
+    } catch (logErr) {
+      console.warn('Error logging scrape run:', logErr);
+    }
+    
+    console.log(`✅ Scraper completed successfully! Found ${finalInternships.length} internships from ${sources.length} sources`);
     
     return {
       success: true,
-      internshipsFound: internships.length,
+      internshipsFound: finalInternships.length,
       updated: 0,
-      added: internships.length
+      added: finalInternships.length,
+      sources
     };
     
   } catch (error) {
@@ -108,17 +204,25 @@ export async function runScraperAPI(): Promise<ScraperResult> {
     
     // Log the failed run
     if (supabaseAdmin) {
-      await supabaseAdmin.from('scrape_logs').insert({
-        run_id: `vercel_${Date.now()}`,
-        status: 'error',
-        error_message: error instanceof Error ? error.message : 'Unknown error',
-        completed_at: new Date().toISOString()
-      });
+      try {
+        await supabaseAdmin.from('scrape_logs').insert({
+          run_id: runId,
+          status: 'error',
+          error_message: error instanceof Error ? error.message : 'Unknown error',
+          completed_at: new Date().toISOString(),
+          source: 'multi-source',
+          duration_ms: Date.now() - startTime.getTime(),
+          sources_data: JSON.stringify(sources)
+        });
+      } catch (logErr) {
+        console.warn('Failed to log error:', logErr);
+      }
     }
     
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: error instanceof Error ? error.message : 'Unknown error',
+      sources
     };
   }
 }
@@ -501,4 +605,281 @@ async function checkApplicationLinks(internships: any[]): Promise<any[]> {
   }
   
   return internships;
+}
+
+// Helper function to normalize role names for better matching
+function normalizeRoleName(role: string): string {
+  return role
+    .toLowerCase()
+    .trim()
+    // Remove common prefixes
+    .replace(/^(campus\s*-?\s*|entry\s*level\s*|junior\s*|graduate\s*|new\s*grad\s*)/i, '')
+    // Remove common suffixes and variations
+    .replace(/\s*(intern|internship|co-op|coop|rotation|program)\s*$/i, '')
+    // Normalize whitespace and special characters
+    .replace(/[-_\s]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Helper function to extract domain from application link
+function extractDomain(url: string | null): string | null {
+  if (!url) return null;
+  try {
+    const urlObj = new URL(url);
+    return urlObj.hostname.replace(/^www\./, '').toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+// Helper function to normalize company name
+function normalizeCompanyName(company: string): string {
+  return company
+    .toLowerCase()
+    .trim()
+    // Remove common suffixes
+    .replace(/\s*(inc\.?|incorporated|corp\.?|corporation|llc|ltd\.?|limited|co\.?|company)\s*$/i, '')
+    // Normalize whitespace and special characters
+    .replace(/[-_\s]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Enhanced deduplication function with multiple matching strategies
+function deduplicateInternships(allInternships: any[]): any[] {
+  const dedupeMap = new Map<string, any>();
+  const domainMap = new Map<string, any>(); // Additional tracking by domain
+  
+  // Sort by source priority (lower number = higher priority)
+  const sortedInternships = allInternships.sort((a, b) => a.source_priority - b.source_priority);
+  
+  for (const internship of sortedInternships) {
+    const normalizedCompany = normalizeCompanyName(internship.company);
+    const normalizedRole = normalizeRoleName(internship.role);
+    const primaryLocation = internship.locations?.[0] || 'remote';
+    const normalizedLocation = primaryLocation.toLowerCase().trim();
+    const applicationDomain = extractDomain(internship.application_link);
+    
+    // Strategy 1: Exact normalized match (company + role + location)
+    const exactKey = `${normalizedCompany}_${normalizedRole}_${normalizedLocation}`;
+    
+    // Strategy 2: Company + role match (more lenient for locations)
+    const roleKey = `${normalizedCompany}_${normalizedRole}`;
+    
+    // Strategy 3: Domain-based matching for additional validation
+    const domainKey = applicationDomain ? `${applicationDomain}_${normalizedRole}` : null;
+    
+    let isDuplicate = false;
+    let duplicateReason = '';
+    
+    // Check exact match first
+    if (dedupeMap.has(exactKey)) {
+      isDuplicate = true;
+      duplicateReason = 'exact match';
+    }
+    // Check role-based match (same company + role, different locations)
+    else if (dedupeMap.has(roleKey)) {
+      const existing = dedupeMap.get(roleKey);
+      // If locations are very similar or one is subset of other, consider duplicate
+      const existingLocation = (existing.locations?.[0] || 'remote').toLowerCase();
+      if (normalizedLocation === existingLocation || 
+          normalizedLocation.includes('remote') && existingLocation.includes('remote') ||
+          Math.abs(normalizedLocation.length - existingLocation.length) <= 3) {
+        isDuplicate = true;
+        duplicateReason = 'role match with similar location';
+      }
+    }
+    // Check domain-based match if we have application domains
+    else if (domainKey && domainMap.has(domainKey)) {
+      const existing = domainMap.get(domainKey);
+      const existingCompany = normalizeCompanyName(existing.company);
+      // If companies are similar and roles match, likely duplicate
+      if (normalizedCompany === existingCompany || 
+          normalizedCompany.includes(existingCompany) || 
+          existingCompany.includes(normalizedCompany)) {
+        isDuplicate = true;
+        duplicateReason = 'domain + role match';
+      }
+    }
+    
+    if (!isDuplicate) {
+      // Store with both keys for future matching
+      dedupeMap.set(exactKey, internship);
+      dedupeMap.set(roleKey, internship);
+      if (domainKey) {
+        domainMap.set(domainKey, internship);
+      }
+    } else {
+      console.log(`🔄 Duplicate found (${duplicateReason}): ${internship.company} - ${internship.role} (source: ${internship.source})`);
+      console.log(`   Original: "${normalizeCompanyName(internship.company)}" - "${normalizeRoleName(internship.role)}"`);
+    }
+  }
+  
+  // Return unique internships (use exactKey pattern to get unique entries)
+  const uniqueInternships: any[] = [];
+  const seenCompanies = new Set<string>();
+  
+  for (const [key, internship] of dedupeMap.entries()) {
+    // Only add if this is the first time we see this exact internship
+    const companyRoleKey = `${normalizeCompanyName(internship.company)}_${normalizeRoleName(internship.role)}_${(internship.locations?.[0] || 'remote').toLowerCase().trim()}`;
+    if (!seenCompanies.has(companyRoleKey)) {
+      uniqueInternships.push(internship);
+      seenCompanies.add(companyRoleKey);
+    }
+  }
+  
+  return uniqueInternships;
+}
+
+// Parser for SimplifyJobs format
+function parseSimplifyJobsMarkdown(content: string): any[] {
+  const lines = content.split('\n');
+  const internships: any[] = [];
+  let lastMainCompany = '';
+  let inTable = false;
+  let headerPassed = false;
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    
+    // Check if we're entering the main table
+    if (line.includes('<tbody>')) {
+      inTable = true;
+      headerPassed = true;
+      continue;
+    }
+    
+    // Check if we're leaving the table
+    if (line.includes('</tbody>')) {
+      inTable = false;
+      continue;
+    }
+    
+    // Skip if not in table or header not passed
+    if (!inTable || !headerPassed) continue;
+    
+    // Look for table rows
+    if (line.startsWith('<tr>')) {
+      // Extract the full row content including subsequent lines
+      let rowContent = '';
+      let j = i;
+      while (j < lines.length && !lines[j].includes('</tr>')) {
+        rowContent += lines[j] + '\n';
+        j++;
+      }
+      if (j < lines.length) {
+        rowContent += lines[j]; // Add the closing </tr>
+      }
+      i = j; // Skip the processed lines
+      
+      // Parse the row
+      const internship = parseSimplifyJobRow(rowContent, lastMainCompany);
+      if (internship) {
+        if (internship.company && internship.company !== '↳') {
+          lastMainCompany = internship.company;
+        }
+        internships.push(internship);
+      }
+    }
+  }
+  
+  console.log(`Parsed ${internships.length} internships from SimplifyJobs`);
+  return internships;
+}
+
+function parseSimplifyJobRow(rowHtml: string, lastMainCompany: string): any | null {
+  try {
+    // Extract table cells using regex
+    const cellRegex = /<td[^>]*>([\s\S]*?)<\/td>/g;
+    const cells: string[] = [];
+    let match;
+    
+    while ((match = cellRegex.exec(rowHtml)) !== null) {
+      cells.push(match[1].trim());
+    }
+    
+    if (cells.length < 4) {
+      return null; // Need at least Company, Role, Location, Application
+    }
+    
+    // Extract company name
+    let company = extractTextFromHtml(cells[0]);
+    let isSubsidiary = false;
+    
+    // Handle subsidiary companies (↳ symbol)
+    if (company === '↳' || company.includes('↳')) {
+      company = lastMainCompany;
+      isSubsidiary = true;
+    }
+    
+    // Extract role
+    const role = extractTextFromHtml(cells[1]);
+    
+    // Extract location(s) - handle multiple locations separated by <br>
+    let locationText = cells[2];
+    const locations = locationText
+      .split(/<br\s*\/?>/i)
+      .map(loc => extractTextFromHtml(loc).trim())
+      .filter(loc => loc.length > 0);
+    
+    // Extract application link - get the first non-simplify link
+    const applicationCell = cells[3];
+    const linkMatch = applicationCell.match(/href="([^"]*)"[^>]*><img[^>]*alt="Apply"/i);
+    let applicationLink = linkMatch ? linkMatch[1] : null;
+    
+    // Skip simplify.jobs links, get direct application links
+    if (applicationLink && applicationLink.includes('simplify.jobs')) {
+      applicationLink = null;
+    }
+    
+    // Extract age/date posted
+    const ageText = cells[4] ? extractTextFromHtml(cells[4]).replace('d', ' days ago') : 'Unknown';
+    
+    // Determine categories and requirements from emojis and text
+    const fullRowText = rowHtml.toLowerCase();
+    const requiresCitizenship = fullRowText.includes('🇺🇸') || fullRowText.includes('requires u.s. citizenship');
+    const noSponsorship = fullRowText.includes('🛂') || fullRowText.includes('does not offer sponsorship');
+    const isClosed = fullRowText.includes('🔒') || fullRowText.includes('application is closed');
+    const isFaang = fullRowText.includes('🔥');
+    const requiresAdvancedDegree = fullRowText.includes('🎓');
+    
+    // Categorize the role
+    const category = categorizeRole(role);
+    
+    if (!company || !role || company.trim() === '' || role.trim() === '') {
+      return null;
+    }
+    
+    return {
+      company: company.trim(),
+      role: role.trim(),
+      category,
+      locations: locations.length > 0 ? locations : ['Remote'],
+      application_link: applicationLink,
+      date_posted: ageText,
+      requires_citizenship: requiresCitizenship,
+      no_sponsorship: noSponsorship,
+      is_subsidiary: isSubsidiary,
+      is_freshman_friendly: !requiresAdvancedDegree, // Assume freshman friendly unless advanced degree required
+      is_closed: isClosed,
+      is_faang: isFaang
+    };
+  } catch (error) {
+    console.warn('Error parsing SimplifyJobs row:', error);
+    return null;
+  }
+}
+
+function extractTextFromHtml(html: string): string {
+  return html
+    .replace(/<[^>]*>/g, '') // Remove HTML tags
+    .replace(/&nbsp;/g, ' ') // Replace &nbsp; with space
+    .replace(/&amp;/g, '&') // Replace &amp; with &
+    .replace(/&lt;/g, '<') // Replace &lt; with <
+    .replace(/&gt;/g, '>') // Replace &gt; with >
+    .replace(/&quot;/g, '"') // Replace &quot; with "
+    .replace(/[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F700}-\u{1F77F}]|[\u{1F780}-\u{1F7FF}]|[\u{1F800}-\u{1F8FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu, '') // Remove all emojis
+    .replace(/🔥|🎓|🇺🇸|🛂|🔒/g, '') // Remove specific emojis used in SimplifyJobs
+    .trim();
 }

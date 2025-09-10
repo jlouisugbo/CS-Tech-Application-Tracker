@@ -149,7 +149,7 @@ export function CompactFilterBar({
   return (
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 mb-6">
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-gray-200">
+      <div className="flex items-center justify-between p-2 border-b border-gray-200">
         <div className="flex items-center space-x-4">
           <div className="flex items-center space-x-2">
             <Filter className="h-4 w-4 text-gray-500" />
@@ -218,7 +218,7 @@ export function CompactFilterBar({
       </div>
 
       {/* Quick Filters */}
-      <div className="p-4 space-y-3">
+      <div className="p-2 space-y-2">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {/* Category */}
           <SearchableSelect
@@ -276,7 +276,7 @@ export function CompactFilterBar({
 
       {/* Extended Filters */}
       {isExpanded && (
-        <div className="border-t border-gray-200 p-4">
+        <div className="border-t border-gray-200 p-2">
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             {/* Citizenship */}
             <div>

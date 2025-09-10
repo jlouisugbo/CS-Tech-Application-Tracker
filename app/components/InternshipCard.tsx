@@ -40,6 +40,21 @@ export function InternshipCard({ internship, isEven }: InternshipCardProps) {
     }
   };
 
+  const handleApplyClick = async () => {
+    if (!user || !internship.application_link || internship.is_closed) return;
+    
+    // If not already saved, save the internship first
+    if (!isSaved) {
+      await saveInternship(internship.id, 'Applied via GT Internship Portal');
+    }
+    
+    // Open the application link
+    window.open(internship.application_link, '_blank');
+    
+    // Here we could also update status to 'applied' but we'll let the user do that manually
+    // This allows flexibility in case they just want to view the application first
+  };
+
   return (
     <div 
       className={`${
@@ -68,6 +83,11 @@ export function InternshipCard({ internship, isEven }: InternshipCardProps) {
                 <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${getCategoryColor(internship.category)}`}>
                   {internship.category}
                 </span>
+                {internship.source && (
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 border border-gray-200">
+                    {internship.source === 'github-primary' ? 'Primary' : internship.source === 'simplify-jobs' ? 'Simplify' : internship.source}
+                  </span>
+                )}
                 {internship.is_freshman_friendly && (
                   <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-200">
                     <GraduationCap className="h-3 w-3 mr-1" />
@@ -145,7 +165,7 @@ export function InternshipCard({ internship, isEven }: InternshipCardProps) {
           {/* Apply Button */}
           {internship.application_link && (
             <button 
-              onClick={internship.is_closed ? undefined : () => window.open(internship.application_link!, '_blank')}
+              onClick={internship.is_closed ? undefined : handleApplyClick}
               disabled={internship.is_closed}
               className={`w-full lg:w-auto inline-flex items-center justify-center px-3 py-2 border border-transparent text-sm font-medium rounded-lg shadow-sm transition-all duration-200 ${
                 internship.is_closed 

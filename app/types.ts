@@ -13,6 +13,7 @@ export interface Internship {
   is_active: boolean;
   is_freshman_friendly?: boolean; // New field for freshman designation
   is_closed?: boolean; // New field for locked/closed internships
+  source?: string; // Source of the internship data
   last_seen: string;
   created_at: string;
 }
@@ -65,7 +66,7 @@ export interface SavedInternship {
   internship_id: string;
   saved_at: string;
   notes?: string;
-  application_status: 'saved' | 'interested' | 'applied' | 'interviewing' | 'offer' | 'rejected' | 'accepted' | 'ghosted' | 'withdrawn';
+  application_status: 'saved' | 'interested' | 'applied' | 'interviewing' | 'waitlisted' | 'offer' | 'offer_accepted' | 'offer_rejected' | 'rejected' | 'accepted' | 'ghosted' | 'withdrawn';
   // Enhanced tracking fields
   applied_at?: string;
   application_link_clicked_at?: string;

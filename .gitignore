@@ -28,3 +28,19 @@ dist-ssr
 .env.development.local
 .env.test.local
 .env.production.local
+
+# Next.js build artifacts
+.next/
+out/
+
+# Production build
+/build
+
+# Claude settings
+.claude/
+
+# Webpack cache and build files
+.next/cache/
+.next/server/
+.next/static/
+.next/trace

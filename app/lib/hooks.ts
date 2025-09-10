@@ -1,8 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from './supabaseClient'
 import type { Internship, User, SavedInternship, FilterState } from '../types'
-// Temporarily import sample data for testing
-import sampleData from './sample-data.json'
 
 // Hook for fetching internships with filters
 export function useInternships(filters: FilterState) {
@@ -24,16 +22,7 @@ export function useInternships(filters: FilterState) {
         
         if (!response.ok) {
           console.error('❌ API request failed:', response.status, response.statusText)
-          // Fallback to sample data if API fails
-          console.log('🔄 Falling back to sample data')
-          const formattedInternships = sampleData.internships.map((internship, index) => ({
-            ...internship,
-            id: `sample_${index}`,
-            is_active: true,
-            last_seen: new Date().toISOString(),
-            created_at: new Date().toISOString(),
-          }))
-          filtered = formattedInternships
+          throw new Error(`Failed to fetch internships: ${response.status} ${response.statusText}`)
         } else {
           const result = await response.json()
           if (result.internships) {
@@ -254,7 +243,6 @@ export function useAuth() {
 
   const signIn = async (email: string, password: string) => {
     try {
-      setLoading(true)
       const { data, error } = await supabase.auth.signInWithPassword({ 
         email, 
         password 
@@ -271,14 +259,11 @@ export function useAuth() {
       return { data, error: null }
     } catch (err) {
       return { error: { message: 'An unexpected error occurred during sign in.' } }
-    } finally {
-      setLoading(false)
     }
   }
 
   const signUp = async (email: string, password: string) => {
     try {
-      setLoading(true)
       const { data, error } = await supabase.auth.signUp({ 
         email, 
         password,
@@ -301,14 +286,11 @@ export function useAuth() {
       return { data, error: null }
     } catch (err) {
       return { error: { message: 'An unexpected error occurred during sign up.' } }
-    } finally {
-      setLoading(false)
     }
   }
 
   const signOut = async () => {
     try {
-      setLoading(true)
       const { error } = await supabase.auth.signOut()
       
       if (!error) {
@@ -319,8 +301,6 @@ export function useAuth() {
       return { error }
     } catch (err) {
       return { error: { message: 'An error occurred during sign out.' } }
-    } finally {
-      setLoading(false)
     }
   }
 

@@ -30,7 +30,7 @@ export function Header() {
   return (
     <>
       <header className="bg-gradient-to-r from-blue-900 to-blue-800 shadow-lg">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
           <div className="flex items-center justify-between">
             <Link href="/" className="flex items-center space-x-4 hover:opacity-90 transition-opacity">
               <div className="flex items-center space-x-2">
