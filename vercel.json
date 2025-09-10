@@ -1,8 +1,0 @@
-{
-  "crons": [
-    {
-      "path": "/api/scrape?secret=$CRON_SECRET",
-      "schedule": "*/30 * * * *"
-    }
-  ]
-}
