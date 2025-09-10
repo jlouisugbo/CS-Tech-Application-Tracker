@@ -10,32 +10,19 @@ class OptimizedInternshipScraper:
         self.base_url = "https://raw.githubusercontent.com/vanshb03/Summer2026-Internships/main/README.md"
         self.internships = []
         
-        # Role categorization keywords - Updated with comprehensive categories
+        # Role categorization keywords
         self.role_categories = {
-            'Software Engineering': ['software engineer', 'swe', 'software development', 'software dev', 'programmer', 'coding', 'programming'],
-            'Full Stack': ['full stack', 'fullstack', 'full-stack'],
-            'Front End': ['frontend', 'front-end', 'front end', 'ui', 'user interface', 'react', 'vue', 'angular'],
-            'Back End': ['backend', 'back-end', 'back end', 'server', 'api', 'database', 'microservices'],
-            'AI/ML': ['ai', 'artificial intelligence', 'ml', 'machine learning', 'deep learning', 'neural network', 'nlp', 'computer vision'],
-            'Data Science': ['data science', 'data scientist', 'predictive analytics', 'statistical analysis', 'big data'],
-            'Data Engineering': ['data engineer', 'data pipeline', 'data warehouse', 'etl', 'data platform'],
-            'DevOps': ['devops', 'infrastructure', 'ci/cd', 'docker', 'kubernetes', 'terraform', 'cloud ops'],
-            'Mobile': ['mobile', 'ios', 'android', 'react native', 'flutter', 'swift', 'kotlin'],
-            'Security': ['security', 'cybersecurity', 'cyber', 'infosec', 'penetration test', 'vulnerability'],
-            'Product Management': ['product manager', 'product management', 'pm', 'product owner', 'product strategy'],
-            'Quant/Trading': ['quant', 'quantitative', 'trading', 'algorithmic trading', 'financial engineering', 'derivatives', 'risk management', 'portfolio', 'hedge fund', 'prop trading'],
-            'Research': ['research', 'researcher', 'research scientist', 'r&d', 'research engineer', 'applied research'],
-            'Business Analyst': ['business analyst', 'business intelligence', 'requirements analyst', 'process analyst'],
-            'Data Analyst': ['data analyst', 'business analyst', 'reporting analyst', 'analytics', 'tableau', 'power bi'],
-            'Hardware Engineering': ['hardware', 'hardware engineer', 'electrical', 'embedded', 'firmware', 'vlsi', 'asic', 'fpga'],
-            'Systems Engineering': ['systems engineer', 'systems', 'distributed systems', 'platform engineer'],
-            'Cloud Engineering': ['cloud', 'aws', 'azure', 'gcp', 'cloud engineer', 'cloud architect'],
-            'Site Reliability Engineering': ['sre', 'site reliability', 'reliability engineer', 'production engineer'],
-            'Information Technology': ['information technology', 'it', 'it support', 'systems admin', 'network admin'],
-            'Quality Assurance': ['qa', 'quality assurance', 'test', 'testing', 'automation test', 'sdet'],
-            'UX/UI Design': ['ux', 'ui', 'user experience', 'user interface', 'design', 'interaction design', 'visual design'],
-            'Sales Engineering': ['sales engineer', 'solutions engineer', 'technical sales', 'pre-sales'],
-            'Technical Program Management': ['technical program manager', 'tpm', 'program manager', 'project manager']
+            'Full Stack': ['full stack', 'fullstack'],
+            'Front End': ['front end', 'frontend', 'ui', 'ux', 'user experience', 'user interface'],
+            'Back End': ['back end', 'backend', 'server'],
+            'AI/ML': ['ai', 'ml', 'machine learning', 'artificial intelligence', 'data science', 'data scientist'],
+            'DevOps': ['devops', 'infrastructure', 'sre', 'site reliability', 'cloud'],
+            'Mobile': ['mobile', 'ios', 'android', 'react native'],
+            'Security': ['security', 'cybersecurity', 'cyber'],
+            'Data': ['data engineer', 'data analyst', 'analytics'],
+            'Product': ['product manager', 'product management', 'pm'],
+            'Information Technology': ['information technology', 'it intern', 'it support', 'systems admin', 'network'],
+            'Software Engineering': ['software engineer', 'swe', 'engineer', 'developer', 'programming', 'software']
         }
         
         # Keywords that indicate freshman-friendly positions
@@ -49,77 +36,39 @@ class OptimizedInternshipScraper:
         # Graduation dates that indicate freshman-friendly (2027-2028 for current freshmen/sophomores)
         self.freshman_graduation_years = ['2027', '2028']
     
-    def extract_emoji_info_and_clean(self, text):
-        """Extract emoji information for flags and truncate text at emoji characters"""
+    def clean_text(self, text):
+        """Clean text by handling unicode and special characters"""
         if not text:
-            return {'requires_citizenship': False, 'no_sponsorship': False, 'is_closed': False, 'cleaned_text': text}
+            return text
         
-        working_text = text
-        requires_citizenship = False
-        no_sponsorship = False
-        is_closed = False
+        import re
         
-        # Check for patterns BEFORE truncating
-        # 1. Check for corrupted/proper US flag patterns
-        if any(pattern in working_text for pattern in ['ðºð¸', '🇺🇸', '\\ud83c\\uddfa\\ud83c\\uddf8']):
-            requires_citizenship = True
-            
-        # 2. Check for corrupted/proper no sponsorship patterns  
-        if any(pattern in working_text for pattern in ['ð', '🛂', '\\ud83d\\udec2']):
-            no_sponsorship = True
-            
-        # 3. Check for closed/lock patterns
-        if any(pattern in working_text for pattern in ['🔒', '\\ud83d\\udd12']):
-            is_closed = True
+        # First, handle the specific unicode escape sequences
+        unicode_replacements = {
+            '\\ud83d\\udec2': '🛂',  # No sponsorship emoji  
+            '\\ud83c\\uddfa\\ud83c\\uddf8': '🇺🇸',  # US flag emoji
+            '\\ud83d\\udd12': '🔒',  # Lock emoji
+            '\ud83d\udec2': '🛂',  # No sponsorship emoji (direct)
+            '\ud83c\uddfa\ud83c\uddf8': '🇺🇸',  # US flag emoji (direct)
+            '\ud83d\udd12': '🔒',  # Lock emoji (direct)
+        }
         
-        # Now truncate at emoji characters - remove everything from the emoji onwards
-        cleaned_text = working_text
+        for old, new in unicode_replacements.items():
+            text = text.replace(old, new)
         
-        # Define truncation patterns - find the FIRST occurrence and cut there
-        truncation_patterns = [
-            'ðºð¸',   # Corrupted US flag
-            'ð',      # Corrupted no sponsorship
-            '🇺🇸',    # Proper US flag
-            '🛂',      # Proper no sponsorship
-            '🔒',      # Proper lock
-            '\\ud83d\\udec2',    # Escaped no sponsorship
-            '\\ud83c\\uddfa\\ud83c\\uddf8',  # Escaped US flag
-            '\\ud83d\\udd12',    # Escaped lock
-            '\ud83d\udec2',      # Direct no sponsorship
-            '\ud83c\uddfa\ud83c\uddf8',  # Direct US flag
-            '\ud83d\udd12',      # Direct lock
-        ]
-        
-        # Find the earliest emoji position to truncate
-        earliest_position = len(cleaned_text)
-        
-        for pattern in truncation_patterns:
-            position = cleaned_text.find(pattern)
-            if position != -1 and position < earliest_position:
-                earliest_position = position
-        
-        # Truncate at the emoji if found
-        if earliest_position < len(cleaned_text):
-            cleaned_text = cleaned_text[:earliest_position]
-        
-        # Handle subsidiary arrow separately (convert but don't truncate)
-        cleaned_text = cleaned_text.replace('â³', '↳')
-        cleaned_text = cleaned_text.replace('\\u21b3', '↳')
+        # Try to decode unicode escape sequences more thoroughly
+        try:
+            # Handle \uXXXX patterns by decoding them
+            import codecs
+            text = codecs.decode(text, 'unicode_escape')
+        except (UnicodeDecodeError, UnicodeError):
+            # If decoding fails, remove the escape sequences
+            text = re.sub(r'\\u[0-9a-fA-F]{4}', '', text)
         
         # Clean up extra spaces and trim
-        cleaned_text = ' '.join(cleaned_text.split()).strip()
+        text = ' '.join(text.split())
         
-        return {
-            'requires_citizenship': requires_citizenship,
-            'no_sponsorship': no_sponsorship, 
-            'is_closed': is_closed,
-            'cleaned_text': cleaned_text
-        }
-    
-    def clean_text(self, text):
-        """Clean text by truncating at emoji characters"""
-        result = self.extract_emoji_info_and_clean(text)
-        return result['cleaned_text']
+        return text.strip()
     
     def fetch_readme(self):
         """Fetch README content"""
@@ -209,13 +158,10 @@ class OptimizedInternshipScraper:
         """Parse citizenship and sponsorship requirements"""
         combined_text = f"{role_text} {application_text}"
         
-        # Extract emoji info and flags
-        result = self.extract_emoji_info_and_clean(combined_text)
-        
         return {
-            'requires_citizenship': result['requires_citizenship'],
-            'no_sponsorship': result['no_sponsorship'],
-            'is_closed': result['is_closed']
+            'requires_citizenship': '🇺🇸' in combined_text,
+            'no_sponsorship': '🛂' in combined_text,
+            'is_closed': '🔒' in combined_text
         }
     
     def parse_internships(self, content):
@@ -248,23 +194,16 @@ class OptimizedInternshipScraper:
             
             company, role, location, application, date_posted = parts
             
-            # Handle subsidiary companies (↳) - check BEFORE cleaning text
-            raw_company = company.strip()
-            is_subsidiary = (raw_company.startswith('↳') or 
-                           raw_company.startswith('\u21b3') or 
-                           raw_company == '↳' or 
-                           raw_company == '\u21b3')
-            
-            if is_subsidiary:
-                company = current_company if current_company else "Unknown Company"
-            else:
-                # Clean and update current_company if this is a real company name
-                company = self.clean_text(company)
-                if company and company.strip():
-                    current_company = company
-            
-            # Clean other text fields
+            # Clean text fields
+            company = self.clean_text(company)
             role = self.clean_text(role)
+            
+            # Handle subsidiary companies (↳)
+            is_subsidiary = company.startswith('↳')
+            if is_subsidiary:
+                company = current_company
+            else:
+                current_company = company
             
             # Parse location
             locations = self.parse_location(location)
@@ -275,8 +214,9 @@ class OptimizedInternshipScraper:
             # Parse requirements
             requirements = self.parse_requirements(role, application)
             
-            # Don't skip closed internships - include them but mark as closed
-            # This allows users to see all internships and filter them if needed
+            # Skip if closed (optional - you might want to keep for tracking)
+            if requirements['is_closed']:
+                continue
             
             # Check if freshman-friendly
             is_frosh_friendly = self.is_freshman_friendly(role, company)
@@ -291,8 +231,7 @@ class OptimizedInternshipScraper:
                 'requires_citizenship': requirements['requires_citizenship'],
                 'no_sponsorship': requirements['no_sponsorship'],
                 'is_subsidiary': is_subsidiary,
-                'is_freshman_friendly': is_frosh_friendly,
-                'is_closed': requirements['is_closed']  # New field for locked/closed internships
+                'is_freshman_friendly': is_frosh_friendly  # New field
             }
             
             self.internships.append(internship)
@@ -313,10 +252,6 @@ class OptimizedInternshipScraper:
         # Log freshman-friendly count
         freshman_count = sum(1 for i in internships if i.get('is_freshman_friendly', False))
         print(f"Found {freshman_count} freshman-friendly internships")
-        
-        # Log subsidiary count
-        subsidiary_count = sum(1 for i in internships if i.get('is_subsidiary', False))
-        print(f"Found {subsidiary_count} subsidiary internships")
         
         return internships
     
@@ -371,53 +306,17 @@ class OptimizedInternshipScraper:
         except Exception as e:
             print(f"Scraping error: {e}")
     
-    def run_scraper(self):
-        """Run scraper and save to database - returns success status"""
-        try:
-            print(f"[{datetime.now()}] Starting scraper run...")
-            
-            # Scrape internships
-            internships = self.scrape()
-            if not internships:
-                print("❌ No internships found")
-                return False
-                
-            print(f"✅ Scraped {len(internships)} internships")
-            
-            # Save to database
-            try:
-                from database_manager import DatabaseManager
-                db = DatabaseManager()
-                result = db.bulk_upsert_internships(internships)
-                
-                if result['success']:
-                    print(f"✅ Database updated: {result['inserted']} new, {result['updated']} updated")
-                    
-                    # Also save JSON backup
-                    self.export_json()
-                    return True
-                else:
-                    print(f"❌ Database update failed: {result.get('error', 'Unknown error')}")
-                    return False
-                    
-            except ImportError:
-                print("⚠️  Database manager not available, saving to JSON only")
-                self.export_json()
-                return True
-                
-        except Exception as e:
-            print(f"💥 Scraper error: {e}")
-            return False
-    
+   
+
     def start_scheduler(self):
         """Start 30-minute scheduled scraping"""
         print("Starting scheduler - every 30 minutes")
         
         # Run immediately
-        self.run_scraper()
+        self.auto_scrape()
         
         # Schedule
-        schedule.every(30).minutes.do(self.run_scraper)
+        schedule.every(30).minutes.do(self.auto_scrape)
         
         while True:
             schedule.run_pending()
@@ -425,12 +324,23 @@ class OptimizedInternshipScraper:
 
 # Usage
 if __name__ == "__main__":
+    def deduplicate_internships(internships):
+        unique = {}
+        for i in internships:
+            link_or_loc = i['application_link'] or (i['locations'][0] if i['locations'] else "")
+            key = (i['company'].strip().lower(), i['role'].strip().lower(), link_or_loc.strip().lower())
+            if key not in unique:
+                unique[key] = i
+        return list(unique.values())
+    
     scraper = OptimizedInternshipScraper()
     
     # One-time run
     internships = scraper.scrape()
+    internships = deduplicate_internships(internships)
     scraper.export_json()
-    
+    freshman_jobs = scraper.get_filtered_data(freshman_friendly=True)
+    print(f"After deduplication: {len(internships)} total internships")
     # Get filtered data examples
     # ai_jobs = scraper.get_filtered_data(category='AI/ML')
     # sf_jobs = scraper.get_filtered_data(location='San Francisco')

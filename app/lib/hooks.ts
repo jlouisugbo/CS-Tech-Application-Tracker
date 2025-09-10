@@ -16,19 +16,16 @@ export function useInternships(filters: FilterState) {
         setLoading(true)
         setError(null)
 
-        // Fetch from Supabase database
-        const { data, error } = await supabase
-          .from('internships')
-          .select('*')
-          .eq('is_active', true)
-          .order('created_at', { ascending: false })
-
+        // Fetch from API endpoint (bypasses RLS issues with direct Supabase access)
+        console.log('🔍 Fetching internships from API endpoint...')
+        const response = await fetch('/api/internships')
+        
         let filtered: any[] = []
         
-        if (error) {
-          console.error('Error fetching internships:', error)
-          // Fallback to sample data if database fails
-          console.log('Falling back to sample data')
+        if (!response.ok) {
+          console.error('❌ API request failed:', response.status, response.statusText)
+          // Fallback to sample data if API fails
+          console.log('🔄 Falling back to sample data')
           const formattedInternships = sampleData.internships.map((internship, index) => ({
             ...internship,
             id: `sample_${index}`,
@@ -38,8 +35,14 @@ export function useInternships(filters: FilterState) {
           }))
           filtered = formattedInternships
         } else {
-          console.log(`Successfully loaded ${data?.length || 0} internships from database`)
-          filtered = data || []
+          const result = await response.json()
+          if (result.internships) {
+            console.log(`✅ Successfully loaded ${result.internships.length} internships from API`)
+            filtered = result.internships
+          } else {
+            console.error('❌ No internships found in API response')
+            filtered = []
+          }
         }
 
         // Apply client-side filters
@@ -133,25 +136,67 @@ export function useInternships(filters: FilterState) {
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
+  const [initializing, setInitializing] = useState(true)
 
   useEffect(() => {
+    let isMounted = true
+
     // Get initial session
     const getSession = async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession()
-        if (session?.user) {
-          // Fetch user profile
-          const { data: profile } = await supabase
+        const { data: { session }, error } = await supabase.auth.getSession()
+        
+        if (error) {
+          console.error('Error getting session:', error)
+          if (isMounted) {
+            setUser(null)
+            setLoading(false)
+            setInitializing(false)
+          }
+          return
+        }
+
+        if (session?.user && isMounted) {
+          // Fetch or create user profile
+          let { data: profile, error: profileError } = await supabase
             .from('users')
             .select('*')
             .eq('id', session.user.id)
             .single()
-          setUser(profile)
+
+          // If profile doesn't exist, create it
+          if (profileError && profileError.code === 'PGRST116') {
+            const { data: newProfile, error: createError } = await supabase
+              .from('users')
+              .insert({
+                id: session.user.id,
+                email: session.user.email,
+                full_name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0]
+              })
+              .select()
+              .single()
+
+            if (!createError && newProfile) {
+              profile = newProfile
+            }
+          }
+
+          if (profile && isMounted) {
+            setUser(profile)
+          }
+        } else if (isMounted) {
+          setUser(null)
         }
       } catch (error) {
-        console.error('Error getting session:', error)
+        console.error('Error in getSession:', error)
+        if (isMounted) {
+          setUser(null)
+        }
       } finally {
-        setLoading(false)
+        if (isMounted) {
+          setLoading(false)
+          setInitializing(false)
+        }
       }
     }
 
@@ -160,45 +205,133 @@ export function useAuth() {
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
+        console.log('Auth state change:', event, session?.user?.email)
+        
+        if (!isMounted) return
+
         if (session?.user) {
-          const { data: profile } = await supabase
+          // Fetch or create user profile
+          let { data: profile, error: profileError } = await supabase
             .from('users')
             .select('*')
             .eq('id', session.user.id)
             .single()
-          setUser(profile)
+
+          // If profile doesn't exist, create it
+          if (profileError && profileError.code === 'PGRST116') {
+            const { data: newProfile, error: createError } = await supabase
+              .from('users')
+              .insert({
+                id: session.user.id,
+                email: session.user.email,
+                full_name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0]
+              })
+              .select()
+              .single()
+
+            if (!createError && newProfile) {
+              profile = newProfile
+            }
+          }
+
+          if (profile) {
+            setUser(profile)
+          }
         } else {
           setUser(null)
         }
+        
         setLoading(false)
+        setInitializing(false)
       }
     )
 
-    return () => subscription.unsubscribe()
+    return () => {
+      isMounted = false
+      subscription.unsubscribe()
+    }
   }, [])
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-    return { error }
+    try {
+      setLoading(true)
+      const { data, error } = await supabase.auth.signInWithPassword({ 
+        email, 
+        password 
+      })
+      
+      if (error) {
+        // Provide more user-friendly error messages
+        if (error.message.includes('Invalid login credentials')) {
+          return { error: { message: 'Invalid email or password. Please check your credentials and try again.' } }
+        }
+        return { error }
+      }
+      
+      return { data, error: null }
+    } catch (err) {
+      return { error: { message: 'An unexpected error occurred during sign in.' } }
+    } finally {
+      setLoading(false)
+    }
   }
 
   const signUp = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signUp({ 
-      email, 
-      password,
-      options: {
-        emailRedirectTo: `${window.location.origin}/`
+    try {
+      setLoading(true)
+      const { data, error } = await supabase.auth.signUp({ 
+        email, 
+        password,
+        options: {
+          emailRedirectTo: `${window.location.origin}/`,
+          data: {
+            full_name: email.split('@')[0]
+          }
+        }
+      })
+      
+      if (error) {
+        // Provide more user-friendly error messages
+        if (error.message.includes('already registered')) {
+          return { error: { message: 'An account with this email already exists. Please sign in instead.' } }
+        }
+        return { error }
       }
-    })
-    return { error }
+      
+      return { data, error: null }
+    } catch (err) {
+      return { error: { message: 'An unexpected error occurred during sign up.' } }
+    } finally {
+      setLoading(false)
+    }
   }
 
   const signOut = async () => {
-    const { error } = await supabase.auth.signOut()
-    return { error }
+    try {
+      setLoading(true)
+      const { error } = await supabase.auth.signOut()
+      
+      if (!error) {
+        // Clear user state immediately for better UX
+        setUser(null)
+      }
+      
+      return { error }
+    } catch (err) {
+      return { error: { message: 'An error occurred during sign out.' } }
+    } finally {
+      setLoading(false)
+    }
   }
 
-  return { user, loading, signIn, signUp, signOut }
+  return { 
+    user, 
+    loading, 
+    initializing,
+    signIn, 
+    signUp, 
+    signOut 
+  }
 }
 
 // Hook for saved internships

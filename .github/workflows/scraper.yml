@@ -12,7 +12,7 @@ jobs:
     steps:
       - name: Trigger Scraper API
         run: |
-          response=$(curl -s -w "\n%{http_code}" -X POST https://your-app.vercel.app/api/scrape \
+          response=$(curl -s -w "\n%{http_code}" -X POST ${{ secrets.VERCEL_APP_URL }}/api/scrape \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
             -H "Content-Type: application/json")
           

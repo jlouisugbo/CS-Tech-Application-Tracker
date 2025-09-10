@@ -64,13 +64,23 @@ export async function runScraperAPI(): Promise<ScraperResult> {
       throw new Error('Supabase admin client not configured');
     }
     
-    // Bulk upsert internships
+    // Clear existing internships for fresh data
+    console.log('🗑️ Clearing existing internship data...');
+    const { error: deleteError } = await supabaseAdmin
+      .from('internships')
+      .delete()
+      .neq('id', ''); // Delete all records (neq with empty string matches all)
+    
+    if (deleteError) {
+      console.warn('Warning: Could not clear existing data:', deleteError.message);
+    } else {
+      console.log('✅ Existing data cleared successfully');
+    }
+    
+    // Insert fresh internships
     const { data, error } = await supabaseAdmin
       .from('internships')
-      .upsert(internships, { 
-        onConflict: 'id',
-        ignoreDuplicates: false 
-      });
+      .insert(internships);
     
     if (error) {
       throw new Error(`Database update failed: ${error.message}`);
@@ -116,6 +126,7 @@ export async function runScraperAPI(): Promise<ScraperResult> {
 function parseInternshipsFromMarkdown(content: string): any[] {
   const lines = content.split('\n');
   const internships: any[] = [];
+  let lastMainCompany = '';
   
   // Find the table start - look for the exact header you specified
   let tableStart = -1;
@@ -146,11 +157,22 @@ function parseInternshipsFromMarkdown(content: string): any[] {
     
     if (parts.length < 4) continue;
     
-    const company = cleanText(parts[0]);
+    let company = cleanText(parts[0]);
     const role = cleanText(parts[1]);
     const locationRaw = parts[2];
     const applicationRaw = parts[3];
     const datePosted = parts[4] ? cleanText(parts[4]) : 'Unknown';
+    
+    // Handle subsidiary companies (↳ character)
+    let isSubsidiary = false;
+    if (company.includes('↳')) {
+      isSubsidiary = true;
+      // Use the last main company for subsidiaries
+      company = lastMainCompany;
+    } else if (company && company !== '↳') {
+      // Update the last main company when we encounter a new one
+      lastMainCompany = company;
+    }
     
     if (!company || !role) continue;
     
@@ -172,7 +194,7 @@ function parseInternshipsFromMarkdown(content: string): any[] {
       date_posted: datePosted,
       requires_citizenship: requirements.requiresCitizenship,
       no_sponsorship: requirements.noSponsorship,
-      is_subsidiary: company.includes('↳'),
+      is_subsidiary: isSubsidiary,
       is_freshman_friendly: requirements.isFreshmanFriendly,
       is_closed: requirements.isClosed
     };
@@ -219,10 +241,18 @@ function parseLocations(locationText: string): string[] {
     return ['Multiple Locations'];
   }
   
-  // Split by common separators
+  // Split by common separators and ensure proper spacing
   const locations = cleaned
     .split(/[,;\/\n]/)
-    .map(loc => loc.trim())
+    .map(loc => {
+      // Fix concatenated locations like "Mountain View, CAAnn Arbor, MI"
+      let fixed = loc.trim();
+      // Add space before state abbreviations that are concatenated
+      fixed = fixed.replace(/([a-z])([A-Z][A-Z])([A-Z][a-z])/g, '$1, $2$3');
+      // Add space before city names that are concatenated  
+      fixed = fixed.replace(/([A-Z]{2})([A-Z][a-z])/g, '$1, $2');
+      return fixed;
+    })
     .filter(loc => loc.length > 0);
   
   return locations.length > 0 ? locations : ['Remote'];
@@ -249,18 +279,22 @@ function detectRequirements(text: string): {
   let isClosed = false;
   let isFreshmanFriendly = false;
 
-  // Check for citizenship requirements (US flag emojis)
-  if (text.includes('🇺🇸') || text.includes('ðºð¸') || text.includes('\\ud83c\\uddfa\\ud83c\\uddf8')) {
+  // Check for citizenship requirements (US flag emojis and encoded versions)
+  if (text.includes('🇺🇸') || text.includes('ðºð¸') || text.includes('\\ud83c\\uddfa\\ud83c\\uddf8') || 
+      text.includes('\ud83c\uddfa\ud83c\uddf8') || text.includes('U.S. Citizenship')) {
     requiresCitizenship = true;
   }
   
-  // Check for no sponsorship (passport/no-entry emojis)
-  if (text.includes('🛂') || text.includes('ð') || text.includes('\\ud83d\\udec2')) {
+  // Check for no sponsorship (passport emoji and encoded versions)  
+  if (text.includes('🛂') || text.includes('ð') || text.includes('\\ud83d\\udec2') ||
+      text.includes('\ud83d\udec2') || text.includes('Does NOT offer Sponsorship') ||
+      text.includes('No Sponsorship')) {
     noSponsorship = true;
   }
   
-  // Check for closed applications (lock emoji)
-  if (text.includes('🔒') || text.includes('\\ud83d\\udd12')) {
+  // Check for closed applications (lock emoji and encoded versions)
+  if (text.includes('🔒') || text.includes('\\ud83d\\udd12') || text.includes('\ud83d\udd12') ||
+      text.includes('application is closed') || text.includes('Internship application is closed')) {
     isClosed = true;
   }
   
@@ -269,10 +303,17 @@ function detectRequirements(text: string): {
     isFreshmanFriendly = true;
   }
 
-  // Clean the role by removing emojis and extra characters
+  // Clean the role by removing emojis, encoded emojis, and text indicators
   const emojiPatterns = [
     /🇺🇸/g, /ðºð¸/g, /🛂/g, /ð(?![\w])/g, /🔒/g, /👨‍🎓/g, /🎓/g,
-    /\\ud83c\\uddfa\\ud83c\\uddf8/g, /\\ud83d\\udec2/g, /\\ud83d\\udd12/g
+    /\\ud83c\\uddfa\\ud83c\\uddf8/g, /\\ud83d\\udec2/g, /\\ud83d\\udd12/g,
+    /\ud83c\uddfa\ud83c\uddf8/g, /\ud83d\udec2/g, /\ud83d\udd12/g,
+    /- 🛂 - Does NOT offer Sponsorship/g,
+    /- 🇺🇸 - Requires U\.S\. Citizenship/g,
+    /- 🔒 - Internship application is closed/g,
+    /Does NOT offer Sponsorship/g,
+    /Requires U\.S\. Citizenship/g,
+    /Internship application is closed/g
   ];
   
   for (const pattern of emojiPatterns) {
@@ -306,13 +347,21 @@ function extractLink(cell: string): string | null {
   // Extract URL from markdown link format [text](url)
   const markdownMatch = cell.match(/\[([^\]]+)\]\(([^)]+)\)/);
   if (markdownMatch) {
-    return markdownMatch[2];
+    let url = markdownMatch[2];
+    // Clean up URL - remove any HTML fragments or extra characters
+    url = url.replace(/">.*$/, ''); // Remove anything after "> (HTML fragments)
+    url = url.replace(/\\$/, ''); // Remove trailing backslash
+    return url;
   }
   
   // Extract direct URL
-  const urlMatch = cell.match(/(https?:\/\/[^\s]+)/);
+  const urlMatch = cell.match(/(https?:\/\/[^\s"<>]+)/);
   if (urlMatch) {
-    return urlMatch[1];
+    let url = urlMatch[1];
+    // Clean up URL - remove any HTML fragments
+    url = url.replace(/">.*$/, ''); // Remove anything after "> (HTML fragments)
+    url = url.replace(/\\$/, ''); // Remove trailing backslash
+    return url;
   }
   
   return null;
@@ -356,66 +405,100 @@ function categorizeRole(role: string): string {
 
 // Check application links to detect closed internships
 async function checkApplicationLinks(internships: any[]): Promise<any[]> {
-  // Only check a sample to avoid overwhelming servers (check max 50 random links)
-  const sampleSize = Math.min(50, internships.length);
-  const shuffled = [...internships].sort(() => 0.5 - Math.random());
-  const sampled = shuffled.slice(0, sampleSize);
+  const batchSize = 20;
+  const delay = 100;
+  console.log(`🔍 Checking all ${internships.length} application links for status...`);
   
-  console.log(`🔍 Checking ${sampled.length} application links for status...`);
+  // Common phrases that indicate a job is closed/unavailable
+  const closedJobIndicators = [
+    "sorry, the job you're looking for isn't available",
+    "this job is no longer available",
+    "position has been filled",
+    "job posting has expired",
+    "application deadline has passed",
+    "no longer accepting applications",
+    "position is no longer open",
+    "job has been removed",
+    "posting has been closed",
+    "opportunity is no longer available",
+    "role has been filled",
+    "applications are now closed",
+    "job opening has closed",
+    "position has closed",
+    "we're no longer hiring for this role",
+    "this position is closed",
+    "job is closed",
+    "expired job posting",
+    "job not found",
+    "position not available"
+  ];
   
-  const promises = sampled.map(async (internship, index) => {
-    if (!internship.application_link) {
-      return internship;
-    }
-    
-    try {
-      // Add delay to be respectful to servers
-      await new Promise(resolve => setTimeout(resolve, index * 200));
+  // Process in batches to avoid overwhelming servers
+  for (let i = 0; i < internships.length; i += batchSize) {
+    const batch = internships.slice(i, i + batchSize);
+    const promises = batch.map(async (internship, batchIndex) => {
+      if (!internship.application_link) return;
       
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
-      
-      const response = await fetch(internship.application_link, {
-        method: 'HEAD', // Use HEAD to minimize data transfer
-        signal: controller.signal,
-        headers: {
-          'User-Agent': 'GT-CS-Internship-Portal/1.0 (Educational Purpose)'
+      try {
+        await new Promise(resolve => setTimeout(resolve, batchIndex * delay));
+        
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000); // Increased timeout for content checking
+        
+        // First try HEAD request for quick status check
+        let response = await fetch(internship.application_link, {
+          method: 'HEAD',
+          signal: controller.signal,
+          headers: { 'User-Agent': 'GT-CS-Internship-Portal/1.0 (Educational Purpose)' }
+        });
+        
+        // If HEAD request fails or returns error, mark as closed
+        if (response.status === 404 || response.status >= 400) {
+          internship.is_closed = true;
+          console.log(`❌ ${internship.company} - HTTP ${response.status}`);
+          clearTimeout(timeoutId);
+          return;
         }
-      });
-      
-      clearTimeout(timeoutId);
-      
-      // Check for common closed indicators
-      if (response.status === 404) {
-        console.log(`❌ ${internship.company} - 404 Not Found`);
-        internship.is_closed = true;
-        internship.closure_reason = '404 - Page not found';
-      } else if (response.status >= 400) {
-        console.log(`⚠️ ${internship.company} - HTTP ${response.status}`);
-        internship.is_closed = true;
-        internship.closure_reason = `HTTP ${response.status}`;
-      } else {
-        // For successful responses, we could check the actual content
-        // but for now, assume it's open if accessible
-        internship.is_closed = false;
+        
+        // If HEAD request succeeds, do a GET request to check content
+        response = await fetch(internship.application_link, {
+          method: 'GET',
+          signal: controller.signal,
+          headers: { 'User-Agent': 'GT-CS-Internship-Portal/1.0 (Educational Purpose)' }
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (response.status === 200) {
+          // Get the page content and check for closure indicators
+          const content = await response.text();
+          const contentLower = content.toLowerCase();
+          
+          // Check if any closure indicators are present
+          const isClosed = closedJobIndicators.some(indicator => 
+            contentLower.includes(indicator.toLowerCase())
+          );
+          
+          if (isClosed) {
+            internship.is_closed = true;
+            console.log(`❌ ${internship.company} - Content indicates job closed`);
+          } else {
+            internship.is_closed = false;
+          }
+        } else {
+          internship.is_closed = true;
+          console.log(`❌ ${internship.company} - HTTP ${response.status}`);
+        }
+        
+      } catch (error) {
+        // Keep existing status on network errors, but log for debugging
+        console.log(`⏭️ ${internship.company} - Network error, skipping`);
       }
-      
-    } catch (error) {
-      // Don't mark as closed for network errors, could be temporary
-      console.log(`⏭️ ${internship.company} - Network error, skipping`);
-    }
+    });
     
-    return internship;
-  });
+    await Promise.all(promises);
+    console.log(`✓ Batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(internships.length/batchSize)} completed`);
+  }
   
-  // Wait for all link checks to complete
-  const checkedSample = await Promise.all(promises);
-  
-  // Replace checked internships in original array
-  const checkedMap = new Map(checkedSample.map(i => [i.application_link, i]));
-  
-  return internships.map(internship => {
-    const checked = checkedMap.get(internship.application_link);
-    return checked || internship;
-  });
+  return internships;
 }

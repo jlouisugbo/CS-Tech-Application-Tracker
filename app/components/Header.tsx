@@ -1,17 +1,30 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { GraduationCap, Code2, User, LogOut, BookmarkIcon } from 'lucide-react';
+import { usePathname } from 'next/navigation';
+import { GraduationCap, Code2, User, LogOut, BookmarkIcon, Home, Search } from 'lucide-react';
 import { useAuth } from '../lib/hooks';
 import { AuthModal } from './AuthModal';
 
 export function Header() {
-  const { user, signOut } = useAuth();
+  const { user, loading, initializing, signOut } = useAuth();
+  const pathname = usePathname();
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
 
   const handleSignOut = async () => {
-    await signOut();
-    setShowUserMenu(false);
+    setSigningOut(true);
+    try {
+      const { error } = await signOut();
+      if (error) {
+        console.error('Sign out error:', error);
+      }
+    } catch (err) {
+      console.error('Unexpected sign out error:', err);
+    } finally {
+      setSigningOut(false);
+      setShowUserMenu(false);
+    }
   };
 
   return (
@@ -43,11 +56,17 @@ export function Header() {
               </div>
               
               {/* User Authentication */}
-              {user ? (
+              {initializing || loading ? (
+                <div className="flex items-center space-x-2 px-4 py-2">
+                  <div className="w-8 h-8 bg-gray-300 rounded-full animate-pulse"></div>
+                  <div className="hidden sm:block w-20 h-4 bg-gray-300 rounded animate-pulse"></div>
+                </div>
+              ) : user ? (
                 <div className="relative">
                   <button
                     onClick={() => setShowUserMenu(!showUserMenu)}
-                    className="flex items-center space-x-2 text-white hover:text-yellow-300 transition-colors focus:outline-none"
+                    disabled={signingOut}
+                    className="flex items-center space-x-2 text-white hover:text-yellow-300 transition-colors focus:outline-none disabled:opacity-50"
                   >
                     <div className="w-8 h-8 bg-yellow-500 rounded-full flex items-center justify-center">
                       <span className="text-blue-900 font-bold text-sm">
@@ -76,10 +95,23 @@ export function Header() {
                       </Link>
                       <button
                         onClick={handleSignOut}
-                        className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                        disabled={signingOut}
+                        className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        <LogOut className="h-4 w-4 mr-2" />
-                        Sign Out
+                        {signingOut ? (
+                          <>
+                            <svg className="animate-spin h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            Signing Out...
+                          </>
+                        ) : (
+                          <>
+                            <LogOut className="h-4 w-4 mr-2" />
+                            Sign Out
+                          </>
+                        )}
                       </button>
                     </div>
                   )}
@@ -94,6 +126,39 @@ export function Header() {
                 </button>
               )}
             </div>
+          </div>
+        </div>
+        
+        {/* Navigation Tabs */}
+        <div className="border-t border-blue-700">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <nav className="flex space-x-8" aria-label="Tabs">
+              <Link
+                href="/"
+                className={`${
+                  pathname === '/' 
+                    ? 'border-yellow-400 text-yellow-300' 
+                    : 'border-transparent text-blue-200 hover:text-white hover:border-blue-400'
+                } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm flex items-center space-x-2 transition-colors`}
+              >
+                <Search className="h-4 w-4" />
+                <span>Browse Internships</span>
+              </Link>
+              
+              {user && (
+                <Link
+                  href="/dashboard"
+                  className={`${
+                    pathname === '/dashboard' 
+                      ? 'border-yellow-400 text-yellow-300' 
+                      : 'border-transparent text-blue-200 hover:text-white hover:border-blue-400'
+                  } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm flex items-center space-x-2 transition-colors`}
+                >
+                  <BookmarkIcon className="h-4 w-4" />
+                  <span>My Dashboard</span>
+                </Link>
+              )}
+            </nav>
           </div>
         </div>
       </header>

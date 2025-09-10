@@ -15,12 +15,6 @@ def load_env_file():
                     key, value = line.strip().split('=', 1)
                     os.environ[key] = value
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-
-print("SUPABASE_URL:", SUPABASE_URL)
-print("SUPABASE_KEY length:", len(SUPABASE_KEY))
-
 # Load environment variables
 load_env_file()
 
@@ -32,18 +26,28 @@ class DatabaseManager:
         
         print(f"Debug - SUPABASE_URL: {supabase_url}")
         print(f"Debug - SUPABASE_KEY: {supabase_key[:20]}..." if supabase_key else "Debug - SUPABASE_KEY: None")
-        
+
         if not supabase_url or not supabase_key:
             raise Exception("Missing SUPABASE_URL or SUPABASE_KEY environment variables")
         
+        print("Connecting with:")
+        print("  URL:", supabase_url)
+        print("  Key repr:", repr(supabase_key))
+        print("  Key length:", len(supabase_key))
+
         # Initialize Supabase client
         self.supabase: Client = create_client(supabase_url, supabase_key)
         
     def generate_record_hash(self, internship: Dict) -> str:
-        """Generate unique hash for each internship record"""
-        # Create hash from company + role + locations
-        unique_string = f"{internship['company']}-{internship['role']}-{'-'.join(internship['locations'])}"
+        """
+        Create a more stable hash for each internship record.
+        Includes company, role, sorted locations, and application link.
+        """
+        loc_str = "|".join(sorted([loc.strip().lower() for loc in internship['locations']]))
+        link = internship['application_link'] or ""
+        unique_string = f"{internship['company'].strip().lower()}-{internship['role'].strip().lower()}-{loc_str}-{link.strip().lower()}"
         return hashlib.md5(unique_string.encode()).hexdigest()
+
     
     def prepare_records(self, internships: List[Dict]) -> List[Dict]:
         """Prepare records with hashes and timestamps"""
@@ -69,40 +73,81 @@ class DatabaseManager:
             prepared.append(record)
         
         return prepared
-    
+
+    def deduplicate_internships(self, internships: list[dict]) -> list[dict]:
+        """Remove duplicate internships based on generated hash"""
+        seen = set()
+        deduped = []
+        for internship in internships:
+            h = self.generate_record_hash(internship)
+            if h not in seen:
+                seen.add(h)
+                deduped.append(internship)
+        return deduped
+
+    def prepare_records(self, internships: List[Dict]) -> List[Dict]:
+        """Prepare records with hashes and timestamps"""
+        prepared = []
+        current_time = datetime.now().isoformat()
+        
+        for internship in internships:
+            record = {
+                'id': self.generate_record_hash(internship),
+                'company': internship['company'],
+                'role': internship['role'],
+                'category': internship['category'],
+                'locations': internship['locations'],  # JSON array
+                'application_link': internship['application_link'],
+                'date_posted': internship['date_posted'],
+                'requires_citizenship': internship['requires_citizenship'],
+                'no_sponsorship': internship['no_sponsorship'],
+                'is_subsidiary': internship['is_subsidiary'],
+                'is_freshman_friendly': internship.get('is_freshman_friendly', False),
+                'last_seen': current_time,  # <-- updated here
+                'is_active': True
+            }
+            prepared.append(record)
+        
+        return prepared
+
     def bulk_upsert_internships(self, internships: List[Dict]) -> bool:
         """
-        Efficient bulk upsert using Supabase's upsert functionality
-        This is MUCH more efficient than individual requests
+        Efficient bulk upsert using Supabase's upsert functionality.
+        Automatically updates last_seen for stale detection.
         """
         try:
+            print(f"Bulk upserting {len(internships)} internships...")
+            internships = self.deduplicate_internships(internships)
+            print(f"After deduplication: {len(internships)} unique internships")
+            
             prepared_records = self.prepare_records(internships)
             
-            # Single bulk upsert operation - handles insert/update automatically
+            # Bulk upsert - insert or update automatically on primary key
             result = self.supabase.table('internships').upsert(
                 prepared_records,
-                on_conflict='id'  # Use our hash as primary key
+                on_conflict='id'
             ).execute()
             
             print(f"Bulk upserted {len(prepared_records)} records")
             return True
-            
+
         except Exception as e:
             print(f"Bulk upsert error: {e}")
             return False
+
     
-    def mark_stale_records(self, current_batch_hashes: List[str]) -> bool:
-        """Mark records not in current scrape as inactive (efficient batch update)"""
+    def mark_stale_records(self) -> bool:
+        """Mark records as inactive if they were not updated in the current scrape"""
         try:
-            # Single query to mark all non-current records as inactive
+            current_time = datetime.now().isoformat()
             result = self.supabase.table('internships').update({
                 'is_active': False,
-                'marked_inactive_at': datetime.now().isoformat()
-            }).not_.in_('id', current_batch_hashes).execute()
-            
-            print(f"Marked stale records as inactive")
+                'marked_inactive_at': current_time
+            }).lt('last_seen', current_time).execute()
+
+            print("Marked stale records as inactive")
             return True
-            
+
         except Exception as e:
             print(f"Error marking stale records: {e}")
             return False

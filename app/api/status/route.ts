@@ -8,13 +8,12 @@ export async function GET() {
     }
 
     // Get the most recent scrape log
-    const { data: recentLog, error } = await supabaseAdmin
+    const { data: recentLogs, error } = await supabaseAdmin
       .from('scrape_logs')
       .select('*')
       .eq('status', 'success')
       .order('completed_at', { ascending: false })
-      .limit(1)
-      .single();
+      .limit(1);
 
     if (error) {
       console.error('Error fetching scrape logs:', error);
@@ -25,6 +24,18 @@ export async function GET() {
         nextUpdate: 'Unknown'
       });
     }
+
+    // If no logs found, return default state
+    if (!recentLogs || recentLogs.length === 0) {
+      return NextResponse.json({
+        lastUpdated: null,
+        status: 'never_run',
+        internshipsFound: 0,
+        nextUpdate: 'Unknown'
+      });
+    }
+
+    const recentLog = recentLogs[0];
 
     // Calculate next update time (30 minutes from last update)
     const lastUpdated = new Date(recentLog.completed_at);
