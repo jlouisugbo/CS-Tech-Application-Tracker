@@ -24,18 +24,12 @@ interface InternshipSource {
   parser: (content: string) => any[];
 }
 
-// Define our sources
+// Define our sources - using only SimplifyJobs as the authoritative source
 const INTERNSHIP_SOURCES: InternshipSource[] = [
-  {
-    name: 'github-primary',
-    url: 'https://raw.githubusercontent.com/vanshb03/Summer2026-Internships/main/README.md',
-    priority: 1,
-    parser: parseInternshipsFromMarkdown
-  },
   {
     name: 'simplify-jobs',
     url: 'https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/refs/heads/dev/README.md',
-    priority: 2,
+    priority: 1,
     parser: parseSimplifyJobsMarkdown
   }
 ];
@@ -106,11 +100,17 @@ export async function runScraperAPI(): Promise<ScraperResult> {
       throw new Error('No internships found from any source');
     }
     
-    console.log(`📊 Total internships before deduplication: ${allInternships.length}`);
+    console.log(`📊 Total internships from SimplifyJobs: ${allInternships.length}`);
     
-    // Deduplicate internships (primary source wins)
-    const deduplicatedInternships = deduplicateInternships(allInternships);
-    console.log(`📊 Total internships after deduplication: ${deduplicatedInternships.length}`);
+    // Basic deduplication for single source (remove exact duplicates)
+    const deduplicatedInternships = allInternships.filter((internship, index, self) => {
+      return self.findIndex(i => 
+        i.company === internship.company && 
+        i.role === internship.role &&
+        i.application_link === internship.application_link
+      ) === index;
+    });
+    console.log(`📊 After removing exact duplicates: ${deduplicatedInternships.length}`);
     
     // Check application links for closed internships
     console.log('🔗 Checking application links for closed internships...');
@@ -189,14 +189,14 @@ export async function runScraperAPI(): Promise<ScraperResult> {
       console.warn('Error logging scrape run:', logErr);
     }
     
-    console.log(`✅ Scraper completed successfully! Found ${finalInternships.length} internships from ${sources.length} sources`);
+    console.log(`✅ Scraper completed successfully! Found ${finalInternships.length} internships from SimplifyJobs source`);
     
     return {
       success: true,
       internshipsFound: finalInternships.length,
       updated: 0,
       added: finalInternships.length,
-      sources
+      sources: ['SimplifyJobs']
     };
     
   } catch (error) {

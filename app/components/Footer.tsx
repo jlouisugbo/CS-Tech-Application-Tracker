@@ -16,17 +16,7 @@ export function Footer() {
           <div className="mt-4 md:mt-0">
             <div className="flex flex-col space-y-3">
               <div className="flex items-center space-x-4">
-                <span className="text-sm font-medium text-gray-700">Data Sources:</span>
-                <a
-                  href="https://github.com/vanshb03/Summer2026-Internships"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center text-sm text-blue-600 hover:text-blue-800 transition-colors"
-                >
-                  <Github className="w-4 h-4 mr-1" />
-                  Primary Repository
-                  <ExternalLink className="w-3 h-3 ml-1" />
-                </a>
+                <span className="text-sm font-medium text-gray-700">Data Source:</span>
                 <a
                   href="https://github.com/SimplifyJobs/Summer2026-Internships"
                   target="_blank"
@@ -34,7 +24,7 @@ export function Footer() {
                   className="inline-flex items-center text-sm text-blue-600 hover:text-blue-800 transition-colors"
                 >
                   <Github className="w-4 h-4 mr-1" />
-                  SimplifyJobs
+                  SimplifyJobs Repository
                   <ExternalLink className="w-3 h-3 ml-1" />
                 </a>
               </div>
