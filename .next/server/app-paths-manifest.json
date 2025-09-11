@@ -1,9 +1,3 @@
 {
-  "/_not-found": "app/_not-found.js",
-  "/apply/[id]/page": "app/apply/[id]/page.js",
-  "/api/scrape/route": "app/api/scrape/route.js",
-  "/api/status/route": "app/api/status/route.js",
-  "/api/internships/route": "app/api/internships/route.js",
-  "/dashboard/page": "app/dashboard/page.js",
   "/page": "app/page.js"
 }

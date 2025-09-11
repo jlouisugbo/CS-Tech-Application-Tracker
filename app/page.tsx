@@ -9,6 +9,8 @@ import { CompanyGroupView } from './components/CompanyGroupView';
 import { RefreshStatus } from './components/RefreshStatus';
 import { Pagination } from './components/Pagination';
 import { Footer } from './components/Footer';
+import { LoadingPage, InternshipCardSkeleton, InternshipGridSkeleton } from './components/LoadingSkeletons';
+import { SearchWithAutocomplete } from './components/SearchWithAutocomplete';
 import { useInternships, useAuth, useFilterOptions } from './lib/hooks';
 import type { FilterState } from './types';
 
@@ -33,6 +35,19 @@ export default function HomePage() {
   const { user, loading: authLoading } = useAuth();
   const { internships, loading, error } = useInternships(filters);
   const { companies, locations, datePosted } = useFilterOptions();
+
+  // Create search suggestions from company names, roles, and categories
+  const searchSuggestions = useMemo(() => {
+    const suggestions = new Set<string>();
+    
+    internships.forEach(internship => {
+      suggestions.add(internship.company);
+      suggestions.add(internship.role);
+      suggestions.add(internship.category);
+    });
+    
+    return Array.from(suggestions).sort();
+  }, [internships]);
 
   const { allFilteredInternships, paginatedInternships, totalPages } = useMemo(() => {
     // First apply search filter
@@ -118,17 +133,13 @@ export default function HomePage() {
       
       {/* Search and Filters Section */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Search Bar */}
-        <div className="relative mb-6">
-          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-            <Search className="h-5 w-5 text-gray-400" />
-          </div>
-          <input
-            type="text"
+        {/* Enhanced Search Bar with Autocomplete */}
+        <div className="mb-6">
+          <SearchWithAutocomplete 
+            searchTerm={searchTerm}
+            onSearchChange={handleSearchChange}
+            suggestions={searchSuggestions}
             placeholder="Search by company, position, or category..."
-            value={searchTerm}
-            onChange={handleSearchChange}
-            className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-2 focus:ring-yellow-500 focus:border-transparent text-gray-900 shadow-sm"
           />
         </div>
 
@@ -191,12 +202,8 @@ export default function HomePage() {
           />
         )}
 
-        {/* Loading State */}
-        {loading && (
-          <div className="flex justify-center items-center py-12">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-yellow-600"></div>
-          </div>
-        )}
+        {/* Enhanced Loading State */}
+        {loading && <LoadingPage />}
 
         {/* Internships Display */}
         {!loading && (

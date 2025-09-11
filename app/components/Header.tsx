@@ -32,20 +32,23 @@ export function Header() {
       <header className="bg-gradient-to-r from-blue-900 to-blue-800 shadow-lg">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
           <div className="flex items-center justify-between">
-            <Link href="/" className="flex items-center space-x-4 hover:opacity-90 transition-opacity">
+            <Link href="/" className="flex items-center space-x-2 sm:space-x-4 hover:opacity-90 transition-opacity">
               <div className="flex items-center space-x-2">
-                <div className="p-2 bg-yellow-500 rounded-lg">
-                  <GraduationCap className="h-8 w-8 text-blue-900" />
+                <div className="p-1.5 sm:p-2 bg-yellow-500 rounded-lg">
+                  <GraduationCap className="h-6 w-6 sm:h-8 sm:w-8 text-blue-900" />
                 </div>
-                <div>
-                  <h1 className="text-2xl font-bold text-white">Georgia Tech</h1>
-                  <p className="text-yellow-300 text-sm font-medium">Office of Student Achievement</p>
+                <div className="hidden xs:block">
+                  <h1 className="text-lg sm:text-2xl font-bold text-white">Georgia Tech</h1>
+                  <p className="text-yellow-300 text-xs sm:text-sm font-medium hidden sm:block">Office of Student Achievement</p>
                 </div>
               </div>
               <div className="hidden sm:block h-8 w-px bg-yellow-400 mx-4"></div>
-              <div className="flex items-center space-x-2">
-                <Code2 className="h-6 w-6 text-yellow-400" />
-                <h2 className="text-xl font-semibold text-white hidden sm:block">Technology Internship Portal</h2>
+              <div className="flex items-center space-x-1 sm:space-x-2">
+                <Code2 className="h-5 w-5 sm:h-6 sm:w-6 text-yellow-400" />
+                <h2 className="text-sm sm:text-xl font-semibold text-white">
+                  <span className="sm:hidden">GT Internships</span>
+                  <span className="hidden sm:block">Technology Internship Portal</span>
+                </h2>
               </div>
             </Link>
             
