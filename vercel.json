@@ -1,0 +1,9 @@
+{
+  "functions": {
+    "app/api/scrape/route.ts": {
+      "maxDuration": 300
+    }
+  },
+  "regions": ["iad1"],
+  "buildCommand": "npm run build"
+}
