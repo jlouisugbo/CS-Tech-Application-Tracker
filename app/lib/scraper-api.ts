@@ -247,13 +247,20 @@ function parseInternshipsFromMarkdown(content: string): any[] {
   }
   
   console.log(`Found table at line ${tableStart - 2}, parsing internships...`);
+  console.log(`Processing lines ${tableStart} to end of file (${lines.length} total lines)`);
   
   // Parse each table row
   for (let i = tableStart; i < lines.length; i++) {
     const line = lines[i].trim();
     
-    // Skip empty lines or non-table lines
-    if (!line || !line.startsWith('|') || line === '---') {
+    // Stop parsing when we hit an empty line or non-table content (end of table)
+    if (!line || (!line.startsWith('|') && line !== '')) {
+      console.log(`Table ended at line ${i}, found ${internships.length} internships`);
+      break;
+    }
+    
+    // Skip separator lines
+    if (line.includes('---')) {
       continue;
     }
     
@@ -740,6 +747,8 @@ function parseSimplifyJobsMarkdown(content: string): any[] {
   let inTable = false;
   let headerPassed = false;
   
+  console.log(`SimplifyJobs: Processing ${lines.length} lines, looking for <tbody> tag...`);
+  
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
     
@@ -747,20 +756,22 @@ function parseSimplifyJobsMarkdown(content: string): any[] {
     if (line.includes('<tbody>')) {
       inTable = true;
       headerPassed = true;
+      console.log(`SimplifyJobs: Found <tbody> at line ${i}, starting to parse table rows...`);
       continue;
     }
     
     // Check if we're leaving the table
     if (line.includes('</tbody>')) {
       inTable = false;
-      continue;
+      console.log(`SimplifyJobs: Found </tbody> at line ${i}, parsed ${internships.length} internships so far`);
+      break; // Exit the loop when table ends
     }
     
     // Skip if not in table or header not passed
     if (!inTable || !headerPassed) continue;
     
-    // Look for table rows
-    if (line.startsWith('<tr>')) {
+    // Look for table rows - be more flexible with whitespace
+    if (line.includes('<tr>') && !line.includes('<th>')) {
       // Extract the full row content including subsequent lines
       let rowContent = '';
       let j = i;
