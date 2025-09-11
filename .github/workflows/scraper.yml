@@ -29,7 +29,7 @@ jobs:
           echo "🔄 Starting scraper at $(date)"
           echo "📡 Calling: ${{ secrets.VERCEL_APP_URL }}/api/scrape"
           
-          response=$(curl -s -w "\n%{http_code}" -X POST "${{ secrets.VERCEL_APP_URL }}/api/scrape" \
+          response=$(curl -s -w "\n%{http_code}" -L -X POST "${{ secrets.VERCEL_APP_URL }}/api/scrape" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
             -H "Content-Type: application/json" \
             --max-time 600 --retry 2 --retry-delay 30)
