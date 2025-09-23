@@ -130,7 +130,7 @@ export function SearchWithAutocomplete({
               {filteredSuggestions.map((suggestion, index) => (
                 <li
                   key={index}
-                  ref={el => suggestionRefs.current[index] = el}
+                  ref={(el) => {suggestionRefs.current[index] = el}}
                   onClick={() => handleSuggestionClick(suggestion)}
                   className={`px-4 py-2 cursor-pointer transition-colors ${
                     index === activeSuggestionIndex
