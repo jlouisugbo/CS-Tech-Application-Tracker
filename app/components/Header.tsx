@@ -1,31 +1,8 @@
-import React, { useState } from 'react';
+import React from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { GraduationCap, Code2, User, LogOut, BookmarkIcon, Home, Search } from 'lucide-react';
-import { useAuth } from '../lib/hooks';
-import { AuthModal } from './AuthModal';
+import { GraduationCap, Code2, User, Search } from 'lucide-react';
 
 export function Header() {
-  const { user, loading, initializing, signOut } = useAuth();
-  const pathname = usePathname();
-  const [showAuthModal, setShowAuthModal] = useState(false);
-  const [showUserMenu, setShowUserMenu] = useState(false);
-  const [signingOut, setSigningOut] = useState(false);
-
-  const handleSignOut = async () => {
-    setSigningOut(true);
-    try {
-      const { error } = await signOut();
-      if (error) {
-        console.error('Sign out error:', error);
-      }
-    } catch (err) {
-      console.error('Unexpected sign out error:', err);
-    } finally {
-      setSigningOut(false);
-      setShowUserMenu(false);
-    }
-  };
 
   return (
     <>
@@ -59,75 +36,10 @@ export function Header() {
               </div>
               
               {/* User Authentication */}
-              {initializing || loading ? (
-                <div className="flex items-center space-x-2 px-4 py-2">
-                  <div className="w-8 h-8 bg-gray-300 rounded-full animate-pulse"></div>
-                  <div className="hidden sm:block w-20 h-4 bg-gray-300 rounded animate-pulse"></div>
-                </div>
-              ) : user ? (
-                <div className="relative">
-                  <button
-                    onClick={() => setShowUserMenu(!showUserMenu)}
-                    disabled={signingOut}
-                    className="flex items-center space-x-2 text-white hover:text-yellow-300 transition-colors focus:outline-none disabled:opacity-50"
-                  >
-                    <div className="w-8 h-8 bg-yellow-500 rounded-full flex items-center justify-center">
-                      <span className="text-blue-900 font-bold text-sm">
-                        {user.email?.charAt(0).toUpperCase()}
-                      </span>
-                    </div>
-                    <span className="hidden sm:block font-medium">
-                      {user.full_name || user.email}
-                    </span>
-                  </button>
-
-                  {/* User Dropdown Menu */}
-                  {showUserMenu && (
-                    <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 z-50">
-                      <div className="px-4 py-2 text-sm text-gray-700 border-b">
-                        Signed in as <br />
-                        <strong>{user.email}</strong>
-                      </div>
-                      <Link
-                        href="/dashboard"
-                        className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
-                        onClick={() => setShowUserMenu(false)}
-                      >
-                        <BookmarkIcon className="h-4 w-4 mr-2" />
-                        Saved Internships
-                      </Link>
-                      <button
-                        onClick={handleSignOut}
-                        disabled={signingOut}
-                        className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {signingOut ? (
-                          <>
-                            <svg className="animate-spin h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                            </svg>
-                            Signing Out...
-                          </>
-                        ) : (
-                          <>
-                            <LogOut className="h-4 w-4 mr-2" />
-                            Sign Out
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <button
-                  onClick={() => setShowAuthModal(true)}
-                  className="flex items-center space-x-2 px-4 py-2 bg-yellow-500 text-blue-900 font-medium rounded-lg hover:bg-yellow-400 transition-colors focus:outline-none focus:ring-2 focus:ring-yellow-300"
-                >
-                  <User className="h-4 w-4" />
-                  <span>Sign In</span>
-                </button>
-              )}
+              <div className="flex items-center space-x-2 px-3 py-1.5 bg-yellow-500/20 border border-yellow-400 rounded-lg">
+                <User className="h-4 w-4 text-yellow-300" />
+                <span className="text-yellow-300 text-sm font-medium">Coming Soon</span>
+              </div>
             </div>
           </div>
         </div>
@@ -138,47 +50,15 @@ export function Header() {
             <nav className="flex space-x-8" aria-label="Tabs">
               <Link
                 href="/"
-                className={`${
-                  pathname === '/' 
-                    ? 'border-yellow-400 text-yellow-300' 
-                    : 'border-transparent text-blue-200 hover:text-white hover:border-blue-400'
-                } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm flex items-center space-x-2 transition-colors`}
+                className="border-yellow-400 text-yellow-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm flex items-center space-x-2 transition-colors"
               >
                 <Search className="h-4 w-4" />
                 <span>Browse Internships</span>
               </Link>
-              
-              {user && (
-                <Link
-                  href="/dashboard"
-                  className={`${
-                    pathname === '/dashboard' 
-                      ? 'border-yellow-400 text-yellow-300' 
-                      : 'border-transparent text-blue-200 hover:text-white hover:border-blue-400'
-                  } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm flex items-center space-x-2 transition-colors`}
-                >
-                  <BookmarkIcon className="h-4 w-4" />
-                  <span>My Dashboard</span>
-                </Link>
-              )}
             </nav>
           </div>
         </div>
       </header>
-
-      {/* Auth Modal */}
-      <AuthModal 
-        isOpen={showAuthModal} 
-        onClose={() => setShowAuthModal(false)} 
-      />
-
-      {/* Click outside to close user menu */}
-      {showUserMenu && (
-        <div 
-          className="fixed inset-0 z-40" 
-          onClick={() => setShowUserMenu(false)}
-        />
-      )}
     </>
   );
 }

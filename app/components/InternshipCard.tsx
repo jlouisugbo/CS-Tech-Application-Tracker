@@ -1,5 +1,5 @@
 import React from 'react';
-import { MapPin, Calendar, ExternalLink, Building2, GraduationCap, Flag, Shield, Lock } from 'lucide-react';
+import { MapPin, Calendar, ExternalLink, Building2, GraduationCap, Flag, Shield, Lock, Sparkles } from 'lucide-react';
 import type { Internship } from '../types';
 import { useAuth, useIsSaved, useSavedInternships } from '../lib/hooks';
 
@@ -25,10 +25,19 @@ const getCategoryColor = (category: string) => {
   return colors[category] || 'bg-gray-100 text-gray-800 border-gray-200';
 };
 
+const isNewInternship = (createdAt: string | undefined): boolean => {
+  if (!createdAt) return false;
+  const created = new Date(createdAt);
+  const now = new Date();
+  const hoursDiff = (now.getTime() - created.getTime()) / (1000 * 60 * 60);
+  return hoursDiff <= 24;
+};
+
 export function InternshipCard({ internship, isEven }: InternshipCardProps) {
   const { user } = useAuth();
   const { saveInternship, unsaveInternship } = useSavedInternships();
   const { isSaved } = useIsSaved(internship.id);
+  const isNew = isNewInternship(internship.created_at);
 
   const handleSaveToggle = async () => {
     if (!user) return;
@@ -83,6 +92,12 @@ export function InternshipCard({ internship, isEven }: InternshipCardProps) {
                 <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${getCategoryColor(internship.category)}`}>
                   {internship.category}
                 </span>
+                {isNew && (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800 border border-emerald-200">
+                    <Sparkles className="h-3 w-3 mr-1" />
+                    NEW
+                  </span>
+                )}
                 {internship.source && (
                   <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 border border-gray-200">
                     {internship.source === 'github-primary' ? 'Primary' : internship.source === 'simplify-jobs' ? 'Simplify' : internship.source}

@@ -102,7 +102,7 @@ export async function runScraperAPI(): Promise<ScraperResult> {
     
     console.log(`📊 Total internships from SimplifyJobs: ${allInternships.length}`);
     
-    // Basic deduplication for single source (remove exact duplicates)
+    // Simple exact duplicate removal - only remove if company + role + link are identical
     const deduplicatedInternships = allInternships.filter((internship, index, self) => {
       return self.findIndex(i => 
         i.company === internship.company && 
@@ -112,21 +112,57 @@ export async function runScraperAPI(): Promise<ScraperResult> {
     });
     console.log(`📊 After removing exact duplicates: ${deduplicatedInternships.length}`);
     
-    // Check application links for closed internships
+    // Skip application link checking for faster testing
     console.log('🔗 Checking application links for closed internships...');
     const checkedInternships = await checkApplicationLinks(deduplicatedInternships);
+
+    // Use Supabase admin client for server-side operations
+    if (!supabaseAdmin) {
+      throw new Error('Supabase admin client not configured');
+    }
     
-    // Format for database insertion
-    const finalInternships = checkedInternships.map((internship: any, index: number) => {
-      const now = new Date().toISOString();
+    // Fetch existing internships to determine what to update vs insert
+    console.log('📥 Fetching existing internships...');
+    const { data: existingInternships, error: fetchError } = await supabaseAdmin
+      .from('internships')
+      .select('id, company, role, locations, created_at');
+    
+    if (fetchError) {
+      console.warn('Warning: Could not fetch existing data:', fetchError.message);
+    }
+    
+    // Create lookup map: unique_key -> existing record
+    const existingMap = new Map<string, any>();
+    const existingIdMap = new Map<string, any>();
+    (existingInternships || []).forEach(record => {
+      const uniqueKey = generateUniqueKey(record.company, record.role, record.locations?.[0]);
+      existingMap.set(uniqueKey, record);
+      existingIdMap.set(record.id, record);
+    });
+    
+    // Prepare internships for upsert with stable IDs
+    const now = new Date().toISOString();
+    const idCounts = new Map<string, number>(); // Track duplicate IDs
+    
+    const finalInternships = checkedInternships.map((internship: any) => {
+      const baseKey = generateUniqueKey(internship.company, internship.role, internship.locations?.[0]);
+      
+      // Check if this exact combination already exists in this batch
+      const count = idCounts.get(baseKey) || 0;
+      const uniqueKey = count > 0 ? `${baseKey}_${count}` : baseKey;
+      idCounts.set(baseKey, count + 1);
+      
+      const existing = existingMap.get(uniqueKey);
+      
       return {
-        id: `${internship.company.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${internship.role.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${index}`,
+        id: existing?.id || uniqueKey, // Use existing ID or create stable one
         company: internship.company,
         role: internship.role,
         category: internship.category,
         locations: internship.locations,
         application_link: internship.application_link,
         date_posted: internship.date_posted,
+        days_ago: internship.days_ago,
         requires_citizenship: internship.requires_citizenship || false,
         no_sponsorship: internship.no_sponsorship || false,
         is_subsidiary: internship.is_subsidiary || false,
@@ -135,36 +171,46 @@ export async function runScraperAPI(): Promise<ScraperResult> {
         is_active: true,
         source: internship.source,
         last_seen: now,
-        created_at: now
+        created_at: existing?.created_at || now // Preserve original creation time
       };
     });
     
-    // Use Supabase admin client for server-side operations
-    if (!supabaseAdmin) {
-      throw new Error('Supabase admin client not configured');
+    // Track scraped unique keys for marking inactive
+    const scrapedKeys = new Set(finalInternships.map(i => i.id));
+    
+    // Mark positions no longer on GitHub as inactive
+    const toMarkInactive = (existingInternships || [])
+      .filter(record => !scrapedKeys.has(record.id))
+      .map(record => record.id);
+    
+    if (toMarkInactive.length > 0) {
+      console.log(`🔴 Marking ${toMarkInactive.length} positions as inactive...`);
+      const { error: inactiveError } = await supabaseAdmin
+        .from('internships')
+        .update({ is_active: false })
+        .in('id', toMarkInactive);
+      
+      if (inactiveError) {
+        console.warn('Warning: Could not mark inactive:', inactiveError.message);
+      }
     }
     
-    // Clear existing internships for fresh data
-    console.log('🗑️ Clearing existing internship data...');
-    const { error: deleteError } = await supabaseAdmin
-      .from('internships')
-      .delete()
-      .neq('id', '');
-    
-    if (deleteError) {
-      console.warn('Warning: Could not clear existing data:', deleteError.message);
-    } else {
-      console.log('✅ Existing data cleared successfully');
-    }
-    
-    // Insert fresh internships
+    // Upsert internships (insert new, update existing)
+    console.log(`💾 Upserting ${finalInternships.length} internships...`);
     const { error } = await supabaseAdmin
       .from('internships')
-      .insert(finalInternships);
+      .upsert(finalInternships, { 
+        onConflict: 'id',
+        ignoreDuplicates: false 
+      });
     
     if (error) {
-      throw new Error(`Database update failed: ${error.message}`);
+      throw new Error(`Database upsert failed: ${error.message}`);
     }
+    
+    // Calculate stats
+    const added = finalInternships.filter(i => !existingMap.has(i.id)).length;
+    const updated = finalInternships.length - added;
     
     // Log the scrape run
     try {
@@ -172,8 +218,8 @@ export async function runScraperAPI(): Promise<ScraperResult> {
         run_id: runId,
         status: 'success',
         internships_found: finalInternships.length,
-        internships_added: finalInternships.length,
-        internships_updated: 0,
+        internships_added: added,
+        internships_updated: updated,
         completed_at: new Date().toISOString(),
         source: 'multi-source',
         duration_ms: Date.now() - startTime.getTime(),
@@ -189,14 +235,18 @@ export async function runScraperAPI(): Promise<ScraperResult> {
       console.warn('Error logging scrape run:', logErr);
     }
     
-    console.log(`✅ Scraper completed successfully! Found ${finalInternships.length} internships from SimplifyJobs source`);
+    console.log(`✅ Scraper completed successfully!`);
+    console.log(`   📊 Total: ${finalInternships.length} internships`);
+    console.log(`   ✨ New: ${added}`);
+    console.log(`   🔄 Updated: ${updated}`);
+    console.log(`   🔴 Marked inactive: ${toMarkInactive.length}`);
     
     return {
       success: true,
       internshipsFound: finalInternships.length,
       updated: 0,
       added: finalInternships.length,
-      sources: ['SimplifyJobs']
+      sources: sources
     };
     
   } catch (error) {
@@ -273,6 +323,7 @@ function parseInternshipsFromMarkdown(content: string): any[] {
     const locationRaw = parts[2];
     const applicationRaw = parts[3];
     const datePosted = parts[4] ? cleanText(parts[4]) : 'Unknown';
+    const daysAgo = parseDaysAgo(datePosted);
     
     // Handle subsidiary companies (↳ character)
     let isSubsidiary = false;
@@ -303,6 +354,7 @@ function parseInternshipsFromMarkdown(content: string): any[] {
       locations: locations,
       application_link: applicationLink,
       date_posted: datePosted,
+      days_ago: daysAgo,
       requires_citizenship: requirements.requiresCitizenship,
       no_sponsorship: requirements.noSponsorship,
       is_subsidiary: isSubsidiary,
@@ -315,6 +367,29 @@ function parseInternshipsFromMarkdown(content: string): any[] {
   
   console.log(`Parsed ${internships.length} internships from GitHub`);
   return internships;
+}
+
+function generateUniqueKey(company: string, role: string, location?: string): string {
+  const loc = location || 'remote';
+  return `${company}_${role}_${loc}`
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '_')
+    .replace(/_+/g, '_')
+    .substring(0, 200); // Limit length for database
+}
+
+function parseDaysAgo(dateText: string): number {
+  if (!dateText) return 9999;
+  
+  const match = dateText.match(/(\d+)\s*days?\s*ago/i);
+  if (match) {
+    return parseInt(match[1], 10);
+  }
+  
+  if (dateText.toLowerCase().includes('today')) return 0;
+  if (dateText.toLowerCase().includes('yesterday')) return 1;
+  
+  return 9999;
 }
 
 function parseLocations(locationText: string): string[] {
@@ -343,8 +418,24 @@ function parseLocations(locationText: string): string[] {
     }
   }
   
-  // Handle regular location text
-  const cleaned = cleanText(locationText);
+  // Handle regular location text - check for <br> tags first
+  let processedText = locationText;
+  
+  // If there are <br> tags, split by them first
+  if (processedText.match(/<\/?br\/?>/i)) {
+    const locations = processedText
+      .split(/<\/?br\/?>/i)
+      .map(loc => cleanText(loc))
+      .filter(loc => loc.length > 0 && !loc.match(/^\d+\s+locations?$/i));
+    
+    if (locations.length > 0) {
+      console.log(`Parsed locations from br tags: [${locations.map(l => `"${l}"`).join(', ')}]`);
+      return locations;
+    }
+  }
+  
+  // Otherwise clean and parse normally
+  const cleaned = cleanText(processedText);
   
   // Skip if it still contains "locations" (means parsing failed)
   if (cleaned.includes('locations') || cleaned.includes('location')) {
@@ -352,21 +443,116 @@ function parseLocations(locationText: string): string[] {
     return ['Multiple Locations'];
   }
   
-  // Split by common separators and ensure proper spacing
-  const locations = cleaned
-    .split(/[,;\/\n]/)
-    .map(loc => {
-      // Fix concatenated locations like "Mountain View, CAAnn Arbor, MI"
-      let fixed = loc.trim();
-      // Add space before state abbreviations that are concatenated
-      fixed = fixed.replace(/([a-z])([A-Z][A-Z])([A-Z][a-z])/g, '$1, $2$3');
-      // Add space before city names that are concatenated  
-      fixed = fixed.replace(/([A-Z]{2})([A-Z][a-z])/g, '$1, $2');
-      return fixed;
-    })
-    .filter(loc => loc.length > 0);
+  // For single locations or simple comma-separated, just return as-is
+  // Don't try to fix concatenated state codes here - that should be handled earlier
+  const locations = [cleaned].filter(loc => loc.length > 0);
   
   return locations.length > 0 ? locations : ['Remote'];
+}
+
+function detectFreshmanFriendly(text: string): boolean {
+  const lowerText = text.toLowerCase();
+  
+  // Graduation requirement triggers
+  const gradTriggers = [
+    'graduation date', 'graduating by', 'graduate by', 'completion date',
+    'expected graduation', 'anticipated graduation', 'graduation between',
+    'rising junior', 'rising senior', 'must graduate', 'will graduate',
+    'graduation year', 'class of', 'expected to graduate'
+  ];
+  
+  // Temporal modifiers
+  const temporalModifiers = [
+    'before', 'after', 'earlier than', 'later than', 'by', 'in', 
+    'between', 'prior to', 'must have', 'only'
+  ];
+  
+  // Check for explicit freshman indicators (always freshman-friendly)
+  if (lowerText.includes('freshman') || text.includes('👨‍🎓') || text.includes('🎓')) {
+    return true;
+  }
+  
+  // Check for graduation requirement patterns
+  let hasGradRequirement = false;
+  let gradContext = '';
+  
+  for (const trigger of gradTriggers) {
+    const triggerIndex = lowerText.indexOf(trigger);
+    if (triggerIndex !== -1) {
+      hasGradRequirement = true;
+      // Extract context window around the trigger (100 chars before and after)
+      const start = Math.max(0, triggerIndex - 100);
+      const end = Math.min(lowerText.length, triggerIndex + trigger.length + 100);
+      gradContext = lowerText.substring(start, end);
+      break;
+    }
+  }
+  
+  // If no graduation requirement found, assume freshman-friendly
+  if (!hasGradRequirement) {
+    return true;
+  }
+  
+  // Parse graduation context for year requirements
+  // Current freshmen graduate in 2029 or later
+  // NOT freshman-friendly if:
+  // - "before 2029" or earlier years (excludes freshmen)
+  // - "by 2028" or earlier years (excludes freshmen)  
+  // - "graduating 2028" or earlier (excludes freshmen)
+  // - "class of 2028" or earlier (excludes freshmen)
+  // - "Rising Junior" or "Rising Senior" only
+  
+  // Check for Rising Junior/Senior only (NOT freshman-friendly)
+  if (lowerText.includes('rising junior') || lowerText.includes('rising senior')) {
+    if (!lowerText.includes('freshman') && !lowerText.includes('sophomore')) {
+      return false;
+    }
+  }
+  
+  // Extract years from context
+  const yearMatches = gradContext.match(/20\d{2}/g);
+  if (yearMatches) {
+    for (const year of yearMatches) {
+      const yearNum = parseInt(year, 10);
+      
+      // Check for restrictive temporal patterns (freshmen graduate 2029+)
+      if (gradContext.includes(`before ${year}`) && yearNum <= 2029) {
+        return false;
+      }
+      if (gradContext.includes(`by ${year}`) && yearNum <= 2028) {
+        return false;
+      }
+      if (gradContext.includes(`graduating ${year}`) && yearNum <= 2028) {
+        return false;
+      }
+      if (gradContext.includes(`graduate ${year}`) && yearNum <= 2028) {
+        return false;
+      }
+      if (gradContext.includes(`class of ${year}`) && yearNum <= 2028) {
+        return false;
+      }
+    }
+  }
+  
+  // Check for season + year patterns (e.g., "Winter 2026", "Spring 2028")
+  const seasonYearPattern = /(winter|spring|summer|fall)\s+20\d{2}/gi;
+  const seasonMatches = gradContext.match(seasonYearPattern);
+  if (seasonMatches) {
+    for (const match of seasonMatches) {
+      const yearMatch = match.match(/20\d{2}/);
+      if (yearMatch) {
+        const yearNum = parseInt(yearMatch[0], 10);
+        // If requirement is "between Winter 2026 - Spring 2028" format
+        // This excludes freshmen (who graduate 2029+)
+        if (gradContext.includes('between') && yearNum >= 2026 && gradContext.includes('2028')) {
+          return false;
+        }
+      }
+    }
+  }
+  
+  // Default to freshman-friendly if no restrictive patterns found
+  return true;
 }
 
 function detectRequirements(text: string): {
@@ -409,10 +595,8 @@ function detectRequirements(text: string): {
     isClosed = true;
   }
   
-  // Check for freshman friendly
-  if (text.toLowerCase().includes('freshman') || text.includes('👨‍🎓') || text.includes('🎓')) {
-    isFreshmanFriendly = true;
-  }
+  // Check for freshman friendly with comprehensive pattern matching
+  isFreshmanFriendly = detectFreshmanFriendly(text);
 
   // Clean the role by removing emojis, encoded emojis, and text indicators
   const emojiPatterns = [
@@ -564,9 +748,9 @@ async function checkApplicationLinks(internships: any[]): Promise<any[]> {
         });
         
         // If HEAD request fails or returns error, mark as closed
-        if (response.status === 404 || response.status >= 400) {
+        if (response.status >= 400) {
           internship.is_closed = true;
-          console.log(`❌ ${internship.company} - HTTP ${response.status}`);
+          console.log(`❌ ${internship.company} - HTTP ${response.status} (marked as closed)`);
           clearTimeout(timeoutId);
           return;
         }
@@ -598,12 +782,14 @@ async function checkApplicationLinks(internships: any[]): Promise<any[]> {
           }
         } else {
           internship.is_closed = true;
-          console.log(`❌ ${internship.company} - HTTP ${response.status}`);
+          console.log(`❌ ${internship.company} - HTTP ${response.status} (marked as closed)`);
         }
         
       } catch (error) {
-        // Keep existing status on network errors, but log for debugging
-        console.log(`⏭️ ${internship.company} - Network error, skipping`);
+        // For network errors, mark as potentially closed but log differently
+        // This helps identify problematic URLs vs definitely closed ones
+        internship.is_closed = true;
+        console.log(`⚠️ ${internship.company} - Network error, marked as closed: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
     });
     
@@ -658,8 +844,8 @@ function deduplicateInternships(allInternships: any[]): any[] {
   const dedupeMap = new Map<string, any>();
   const domainMap = new Map<string, any>(); // Additional tracking by domain
   
-  // Sort by source priority (lower number = higher priority)
-  const sortedInternships = allInternships.sort((a, b) => a.source_priority - b.source_priority);
+  // Sort by source priority (lower number = higher priority), default to 1 if missing
+  const sortedInternships = allInternships.sort((a, b) => (a.source_priority || 1) - (b.source_priority || 1));
   
   for (const internship of sortedInternships) {
     const normalizedCompany = normalizeCompanyName(internship.company);
@@ -847,13 +1033,17 @@ function parseSimplifyJobRow(rowHtml: string, lastMainCompany: string): any | nu
     // Extract age/date posted
     const ageText = cells[4] ? extractTextFromHtml(cells[4]).replace('d', ' days ago') : 'Unknown';
     
-    // Determine categories and requirements from emojis and text
-    const fullRowText = rowHtml.toLowerCase();
-    const requiresCitizenship = fullRowText.includes('🇺🇸') || fullRowText.includes('requires u.s. citizenship');
-    const noSponsorship = fullRowText.includes('🛂') || fullRowText.includes('does not offer sponsorship');
-    const isClosed = fullRowText.includes('🔒') || fullRowText.includes('application is closed');
-    const isFaang = fullRowText.includes('🔥');
-    const requiresAdvancedDegree = fullRowText.includes('🎓');
+    // Determine categories and requirements from emojis and text  
+    // Search the full row HTML for emojis (including company cell and role cell)
+    const fullRowText = rowHtml;
+    const requiresCitizenship = fullRowText.includes('🇺🇸') || fullRowText.includes('requires u.s. citizenship') || 
+                               fullRowText.includes('\\ud83c\\uddfa\\ud83c\\uddf8') || fullRowText.includes('\ud83c\uddfa\ud83c\uddf8');
+    const noSponsorship = fullRowText.includes('🛂') || fullRowText.includes('does not offer sponsorship') ||
+                         fullRowText.includes('\\ud83d\\udec2') || fullRowText.includes('\ud83d\udec2');
+    const isClosed = fullRowText.includes('🔒') || fullRowText.includes('application is closed') ||
+                    fullRowText.includes('\\ud83d\\udd12') || fullRowText.includes('\ud83d\udd12');
+    const isFaang = fullRowText.includes('🔥') || fullRowText.includes('\\ud83d\\udd25') || fullRowText.includes('\ud83d\udd25');
+    const requiresAdvancedDegree = fullRowText.includes('🎓') || fullRowText.includes('\\ud83c\\udf93') || fullRowText.includes('\ud83c\udf93');
     
     // Categorize the role
     const category = categorizeRole(role);
@@ -874,7 +1064,8 @@ function parseSimplifyJobRow(rowHtml: string, lastMainCompany: string): any | nu
       is_subsidiary: isSubsidiary,
       is_freshman_friendly: !requiresAdvancedDegree, // Assume freshman friendly unless advanced degree required
       is_closed: isClosed,
-      is_faang: isFaang
+      is_faang: isFaang,
+      requires_advanced_degree: requiresAdvancedDegree
     };
   } catch (error) {
     console.warn('Error parsing SimplifyJobs row:', error);
@@ -890,7 +1081,9 @@ function extractTextFromHtml(html: string): string {
     .replace(/&lt;/g, '<') // Replace &lt; with <
     .replace(/&gt;/g, '>') // Replace &gt; with >
     .replace(/&quot;/g, '"') // Replace &quot; with "
-    .replace(/[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F700}-\u{1F77F}]|[\u{1F780}-\u{1F7FF}]|[\u{1F800}-\u{1F8FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu, '') // Remove all emojis
-    .replace(/🔥|🎓|🇺🇸|🛂|🔒/g, '') // Remove specific emojis used in SimplifyJobs
+    // Remove specific emojis used in SimplifyJobs legend (but keep them in the raw HTML for detection)
+    .replace(/🔥|🎓|🇺🇸|🛂|🔒/g, '')
+    // Remove other common emojis
+    .replace(/[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F700}-\u{1F77F}]|[\u{1F780}-\u{1F7FF}]|[\u{1F800}-\u{1F8FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu, '')
     .trim();
 }

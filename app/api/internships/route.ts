@@ -12,7 +12,7 @@ export async function GET() {
       .from('internships')
       .select('*')
       .eq('is_active', true)
-      .order('created_at', { ascending: false });
+      .order('days_ago', { ascending: true });
 
     if (error) {
       console.error('Error fetching internships:', error);

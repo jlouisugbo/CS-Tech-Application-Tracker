@@ -603,29 +603,24 @@ export function useFilterOptions() {
   useEffect(() => {
     const fetchOptions = async () => {
       try {
-        // Fetch from Supabase database
-        const { data, error } = await supabase
-          .from('internships')
-          .select('company, locations, date_posted')
-          .eq('is_active', true)
-
-        if (error || !data) {
-          console.error('Error fetching filter options:', error)
-          // Keep default values
+        const response = await fetch('/api/internships')
+        
+        if (!response.ok) {
           return
         }
+        
+        const result = await response.json()
+        const data = result.internships || []
 
-        // Extract unique values from database
         const uniqueCompanies = new Set<string>()
         const uniqueLocations = new Set<string>()
         const uniqueDates = new Set<string>()
 
-        data.forEach((internship) => {
+        data.forEach((internship: any) => {
           uniqueCompanies.add(internship.company)
           
-          // Add each location
           internship.locations?.forEach((location: string) => {
-            if (location.trim() && !location.includes('locations')) { // Filter out "X locations" entries
+            if (location.trim() && !location.includes('locations')) {
               uniqueLocations.add(location.trim())
             }
           })
@@ -633,7 +628,6 @@ export function useFilterOptions() {
           uniqueDates.add(internship.date_posted)
         })
 
-        // Sort and set options
         setCompanies(['All', ...Array.from(uniqueCompanies).sort()])
         setLocations(['All', ...Array.from(uniqueLocations).sort()])
         setDatePosted(['All', ...Array.from(uniqueDates).sort()])

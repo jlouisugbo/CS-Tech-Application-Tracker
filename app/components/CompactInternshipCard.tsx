@@ -1,5 +1,5 @@
 import React, { memo, useState } from 'react';
-import { MapPin, Calendar, ExternalLink, Building2, GraduationCap, Flag, Shield, Lock, CheckCircle, Clock, Users, TrendingUp } from 'lucide-react';
+import { MapPin, Calendar, ExternalLink, Building2, GraduationCap, Flag, Shield, Lock, CheckCircle, Clock, Users, TrendingUp, Sparkles } from 'lucide-react';
 import type { Internship, SavedInternship } from '../types';
 import { useAuth, useIsSaved, useSavedInternships } from '../lib/hooks';
 import { LocationsModal } from './LocationsModal';
@@ -42,6 +42,14 @@ const getCategoryColor = (category: string) => {
   return colors[category] || 'bg-gray-100 text-gray-800';
 };
 
+const isNewInternship = (createdAt: string | undefined): boolean => {
+  if (!createdAt) return false;
+  const created = new Date(createdAt);
+  const now = new Date();
+  const hoursDiff = (now.getTime() - created.getTime()) / (1000 * 60 * 60);
+  return hoursDiff <= 24; // New if created within last 24 hours
+};
+
 export const CompactInternshipCard = memo(function CompactInternshipCard({ internship, variant, isEven = false }: CompactInternshipCardProps) {
   const { user } = useAuth();
   const { saveInternship, unsaveInternship, savedInternships, markLinkClicked } = useSavedInternships();
@@ -51,6 +59,9 @@ export const CompactInternshipCard = memo(function CompactInternshipCard({ inter
 
   // Get saved internship data if it exists
   const savedInternship = savedInternships.find(s => s.internship_id === internship.id);
+  
+  // Check if internship is new
+  const isNew = isNewInternship(internship.created_at);
 
   const handleSaveToggle = async () => {
     if (!user) return;
@@ -166,6 +177,13 @@ export const CompactInternshipCard = memo(function CompactInternshipCard({ inter
              internship.category}
           </span>
           
+          {isNew && (
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">
+              <Sparkles className="w-3 h-3 mr-0.5" />
+              NEW
+            </span>
+          )}
+          
           {internship.is_freshman_friendly && (
             <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
               Fresh
@@ -235,7 +253,7 @@ export const CompactInternshipCard = memo(function CompactInternshipCard({ inter
           </div>
 
           {/* Category badge */}
-          <div className="flex-shrink-0">
+          <div className="flex-shrink-0 flex items-center gap-1">
             <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getCategoryColor(internship.category)}`}>
               {internship.category === 'Software Engineering' ? 'SWE' : 
                internship.category === 'Information Technology' ? 'IT' :
@@ -252,6 +270,13 @@ export const CompactInternshipCard = memo(function CompactInternshipCard({ inter
                internship.category === 'Sales Engineering' ? 'Sales Eng' :
                internship.category}
             </span>
+            
+            {isNew && (
+              <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">
+                <Sparkles className="w-3 h-3 mr-1" />
+                NEW
+              </span>
+            )}
           </div>
 
           {/* Location */}

@@ -7,7 +7,7 @@ from datetime import datetime
 
 class OptimizedInternshipScraper:
     def __init__(self):
-        self.base_url = "https://raw.githubusercontent.com/vanshb03/Summer2026-Internships/main/README.md"
+        self.base_url = "https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/refs/heads/dev/README.md"
         self.internships = []
         
         # Role categorization keywords
@@ -48,9 +48,13 @@ class OptimizedInternshipScraper:
             '\\ud83d\\udec2': '🛂',  # No sponsorship emoji  
             '\\ud83c\\uddfa\\ud83c\\uddf8': '🇺🇸',  # US flag emoji
             '\\ud83d\\udd12': '🔒',  # Lock emoji
+            '\\ud83d\\udd25': '🔥',  # Fire emoji (FAANG+)
+            '\\ud83c\\udf93': '🎓',  # Graduation cap emoji (Advanced degree)
             '\ud83d\udec2': '🛂',  # No sponsorship emoji (direct)
             '\ud83c\uddfa\ud83c\uddf8': '🇺🇸',  # US flag emoji (direct)
             '\ud83d\udd12': '🔒',  # Lock emoji (direct)
+            '\ud83d\udd25': '🔥',  # Fire emoji (direct)
+            '\ud83c\udf93': '🎓',  # Graduation cap emoji (direct)
         }
         
         for old, new in unicode_replacements.items():
@@ -81,10 +85,10 @@ class OptimizedInternshipScraper:
             return None
     
     def find_table_start(self, lines):
-        """Find the exact table start line"""
+        """Find the exact table start line for HTML table"""
         for i, line in enumerate(lines):
-            if "| Company | Role | Location | Application/Link | Date Posted |" in line:
-                return i + 2  # Skip header and separator line
+            if "<tbody>" in line:
+                return i + 1  # Start from next line after <tbody>
         return -1
     
     def extract_application_link(self, cell):
@@ -161,42 +165,66 @@ class OptimizedInternshipScraper:
         return {
             'requires_citizenship': '🇺🇸' in combined_text,
             'no_sponsorship': '🛂' in combined_text,
-            'is_closed': '🔒' in combined_text
+            'is_closed': '🔒' in combined_text,
+            'is_faang': '🔥' in combined_text,
+            'requires_advanced_degree': '🎓' in combined_text
         }
     
-    def parse_internships(self, content):
-        """Main parsing logic - your optimized approach"""
-        lines = content.split('\n')
+    def parse_html_table_row(self, line):
+        """Parse HTML table row to extract cell contents"""
+        # Extract content between <td> tags
+        cells = re.findall(r'<td[^>]*>(.*?)</td>', line, re.DOTALL)
+        if len(cells) < 5:
+            return None
         
-        # Find guaranteed starting point
-        table_start = self.find_table_start(lines)
-        if table_start == -1:
-            print("Table header not found")
+        # Extract text content from HTML
+        company_html, role_html, location_html, application_html, age_html = cells
+        
+        # Clean company name (remove <strong> tags)
+        company = re.sub(r'<[^>]+>', '', company_html).strip()
+        
+        # Clean role (preserve emojis)
+        role = re.sub(r'<[^>]+>', '', role_html).strip()
+        
+        # Clean location
+        location = location_html.strip()
+        
+        # Application stays as HTML to extract links
+        application = application_html.strip()
+        
+        # Age becomes date_posted
+        date_posted = re.sub(r'<[^>]+>', '', age_html).strip()
+        
+        return company, role, location, application, date_posted
+    
+    def parse_internships(self, content):
+        """Main parsing logic for HTML table format"""
+        # Use regex to find all complete table rows
+        table_rows = re.findall(r'<tr>\s*(.*?)\s*</tr>', content, re.DOTALL)
+        
+        if not table_rows:
+            print("No table rows found")
             return []
         
         current_company = None
         self.internships = []
         
-        # Process each line after table start
-        for line in lines[table_start:]:
-            line = line.strip()
-            
-            # Skip empty lines and non-table content
-            if not line or not line.startswith('|'):
+        # Process each table row
+        for row in table_rows:
+            # Parse HTML table row
+            row_data = self.parse_html_table_row(f'<tr>{row}</tr>')
+            if not row_data:
                 continue
             
-            # Split by | and remove first empty element
-            parts = [part.strip() for part in line.split('|')]
-            parts = parts[1:-1]  # Remove empty first and last elements
-            
-            if len(parts) < 5:
-                continue
-            
-            company, role, location, application, date_posted = parts
+            company, role, location, application, date_posted = row_data
             
             # Clean text fields
             company = self.clean_text(company)
             role = self.clean_text(role)
+            
+            # Skip if company is empty (likely header row)
+            if not company:
+                continue
             
             # Handle subsidiary companies (↳)
             is_subsidiary = company.startswith('↳')
@@ -231,7 +259,9 @@ class OptimizedInternshipScraper:
                 'requires_citizenship': requirements['requires_citizenship'],
                 'no_sponsorship': requirements['no_sponsorship'],
                 'is_subsidiary': is_subsidiary,
-                'is_freshman_friendly': is_frosh_friendly  # New field
+                'is_freshman_friendly': is_frosh_friendly,
+                'is_faang': requirements['is_faang'],
+                'requires_advanced_degree': requirements['requires_advanced_degree']
             }
             
             self.internships.append(internship)
