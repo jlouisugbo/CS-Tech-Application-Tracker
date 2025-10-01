@@ -3,6 +3,8 @@ import { MapPin, Calendar, ExternalLink, Building2, GraduationCap, Flag, Shield,
 import type { Internship, SavedInternship } from '../types';
 import { useAuth, useIsSaved, useSavedInternships } from '../lib/hooks';
 import { LocationsModal } from './LocationsModal';
+import { getGuestApplyPreference } from '../lib/auth-utils';
+import { useToast } from './toast/ToastProvider';
 import { CompanyAvatar } from './CompanyAvatar';
 
 interface CompactInternshipCardProps {
@@ -52,6 +54,7 @@ const isNewInternship = (createdAt: string | undefined): boolean => {
 
 export const CompactInternshipCard = memo(function CompactInternshipCard({ internship, variant, isEven = false }: CompactInternshipCardProps) {
   const { user } = useAuth();
+  const { show } = useToast();
   const { saveInternship, unsaveInternship, savedInternships, markLinkClicked } = useSavedInternships();
   const { isSaved } = useIsSaved(internship.id);
   const [showStatusMenu, setShowStatusMenu] = useState(false);
@@ -72,17 +75,47 @@ export const CompactInternshipCard = memo(function CompactInternshipCard({ inter
     }
   };
 
-  const handleApplyClick = () => {
+  const handleApplyClick = async () => {
     if (!internship.application_link || internship.is_closed) return;
     
-    // If saved, use verification flow, otherwise direct link
-    if (savedInternship) {
-      // Navigate to verification page
+    // If the user is logged in, ensure it's saved and route through tracking page
+    if (user) {
+      try {
+        if (!savedInternship && !isSaved) {
+          await saveInternship(internship.id, 'Applied via GT Internship Portal');
+        }
+      } catch (e) {
+        // Silent fail - we'll still navigate
+      }
       window.location.href = `/apply/${internship.id}`;
-    } else {
-      // Direct application for unsaved internships
-      window.open(internship.application_link, '_blank');
+      return;
     }
+    // Not logged in: check if user prefers guest apply
+    const guestMode = getGuestApplyPreference();
+    if (guestMode) {
+      window.open(internship.application_link, '_blank');
+      return;
+    }
+    // Otherwise, show a one-time info toast and open auth modal with apply context
+    try {
+      const firstShownKey = 'gt_guest_info_toast_shown';
+      const shown = typeof window !== 'undefined' ? localStorage.getItem(firstShownKey) : 'true';
+      if (!shown || shown !== 'true') {
+        show('Sign in to save and track your applications. Continue as guest to skip sign-in.', 'info');
+        if (typeof window !== 'undefined') localStorage.setItem(firstShownKey, 'true');
+      }
+    } catch {}
+    // Open auth modal with apply context and provide a guest handler
+    const onContinueAsGuest = () => {
+      window.open(internship.application_link!, '_blank');
+    };
+    const event = new CustomEvent('open-auth-modal', {
+      detail: {
+        reason: 'apply',
+        onContinueAsGuest,
+      },
+    });
+    window.dispatchEvent(event);
   };
 
   const getStatusIcon = (status: SavedInternship['application_status']) => {
@@ -119,9 +152,9 @@ export const CompactInternshipCard = memo(function CompactInternshipCard({ inter
             {user && (
               <button
                 onClick={handleSaveToggle}
-                className={`p-1 rounded ${isSaved ? 'text-yellow-600' : 'text-gray-400 hover:text-gray-600'}`}
+                className={`p-2 rounded min-h-[44px] min-w-[44px] flex items-center justify-center touch-manipulation ${isSaved ? 'text-yellow-600' : 'text-gray-400 hover:text-gray-600'}`}
               >
-                <svg className="w-4 h-4" fill={isSaved ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-5 h-5" fill={isSaved ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
                 </svg>
               </button>
@@ -136,13 +169,13 @@ export const CompactInternshipCard = memo(function CompactInternshipCard({ inter
               <button
                 onClick={handleApplyClick}
                 disabled={internship.is_closed}
-                className={`p-1 rounded transition-colors ${
-                  internship.is_closed 
-                    ? 'text-gray-400 cursor-not-allowed' 
+                className={`p-2 rounded min-h-[44px] min-w-[44px] flex items-center justify-center touch-manipulation transition-colors ${
+                  internship.is_closed
+                    ? 'text-gray-400 cursor-not-allowed'
                     : 'text-blue-600 hover:text-blue-800'
                 }`}
               >
-                {internship.is_closed ? <Lock className="w-4 h-4" /> : <ExternalLink className="w-4 h-4" />}
+                {internship.is_closed ? <Lock className="w-5 h-5" /> : <ExternalLink className="w-5 h-5" />}
               </button>
             )}
           </div>
@@ -199,9 +232,9 @@ export const CompactInternshipCard = memo(function CompactInternshipCard({ inter
 
         {/* Location and requirements - push to bottom */}
         <div className="text-xs text-gray-600 space-y-1 mt-auto">
-          <button 
+          <button
             onClick={() => setShowLocationsModal(true)}
-            className="flex items-center hover:text-blue-600 transition-colors"
+            className="flex items-center hover:text-blue-600 transition-colors min-h-[44px] touch-manipulation"
           >
             <MapPin className="w-3 h-3 mr-1 flex-shrink-0" />
             <span className="truncate">
@@ -280,9 +313,9 @@ export const CompactInternshipCard = memo(function CompactInternshipCard({ inter
           </div>
 
           {/* Location */}
-          <button 
+          <button
             onClick={() => setShowLocationsModal(true)}
-            className="hidden sm:flex flex-shrink-0 items-center text-xs text-gray-600 hover:text-blue-600 transition-colors"
+            className="hidden sm:flex flex-shrink-0 items-center text-xs text-gray-600 hover:text-blue-600 transition-colors min-h-[44px] touch-manipulation"
           >
             <MapPin className="w-3 h-3 mr-1" />
             <span className="max-w-24 truncate">
@@ -327,9 +360,9 @@ export const CompactInternshipCard = memo(function CompactInternshipCard({ inter
           {user && (
             <button
               onClick={handleSaveToggle}
-              className={`p-1 rounded transition-colors ${isSaved ? 'text-yellow-600' : 'text-gray-400 hover:text-gray-600'}`}
+              className={`p-2 rounded min-h-[44px] min-w-[44px] flex items-center justify-center touch-manipulation transition-colors ${isSaved ? 'text-yellow-600' : 'text-gray-400 hover:text-gray-600'}`}
             >
-              <svg className="w-4 h-4" fill={isSaved ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-5 h-5" fill={isSaved ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
               </svg>
             </button>
@@ -349,9 +382,9 @@ export const CompactInternshipCard = memo(function CompactInternshipCard({ inter
             <button
               onClick={handleApplyClick}
               disabled={internship.is_closed}
-              className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-                internship.is_closed 
-                  ? 'text-gray-500 bg-gray-200 cursor-not-allowed' 
+              className={`px-4 py-2 text-sm font-medium rounded-md transition-colors min-h-[44px] touch-manipulation ${
+                internship.is_closed
+                  ? 'text-gray-500 bg-gray-200 cursor-not-allowed'
                   : 'text-white bg-blue-600 hover:bg-blue-700'
               }`}
             >

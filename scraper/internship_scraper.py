@@ -10,19 +10,25 @@ class OptimizedInternshipScraper:
         self.base_url = "https://raw.githubusercontent.com/SimplifyJobs/Summer2026-Internships/refs/heads/dev/README.md"
         self.internships = []
         
-        # Role categorization keywords
+        # Role categorization keywords (PRIORITY ORDER: specific → generic)
         self.role_categories = {
-            'Full Stack': ['full stack', 'fullstack'],
-            'Front End': ['front end', 'frontend', 'ui', 'ux', 'user experience', 'user interface'],
-            'Back End': ['back end', 'backend', 'server'],
-            'AI/ML': ['ai', 'ml', 'machine learning', 'artificial intelligence', 'data science', 'data scientist'],
-            'DevOps': ['devops', 'infrastructure', 'sre', 'site reliability', 'cloud'],
-            'Mobile': ['mobile', 'ios', 'android', 'react native'],
-            'Security': ['security', 'cybersecurity', 'cyber'],
-            'Data': ['data engineer', 'data analyst', 'analytics'],
-            'Product': ['product manager', 'product management', 'pm'],
-            'Information Technology': ['information technology', 'it intern', 'it support', 'systems admin', 'network'],
-            'Software Engineering': ['software engineer', 'swe', 'engineer', 'developer', 'programming', 'software']
+            'Quant/Trading': ['quant', 'quantitative', 'trading', 'algorithmic trading', 'financial engineering', 'prop trading'],
+            'Hardware Engineering': ['hardware engineer', 'hardware', 'electrical engineer', 'electrical', 'embedded', 'firmware', 'semiconductor', 'asic', 'vlsi', 'circuit design', 'chip design', 'pcb', 'fpga', 'rtl', 'verilog', 'equipment engineering'],
+            'AI/ML': ['artificial intelligence', 'machine learning', 'deep learning', 'neural network', 'computer vision', 'generative ai', 'llm', 'ai', 'ml', 'nlp', 'data science', 'data scientist'],
+            'Full Stack': ['full stack', 'fullstack', 'full-stack'],
+            'Mobile': ['mobile', 'ios', 'android', 'react native', 'flutter', 'swift', 'kotlin'],
+            'DevOps': ['devops', 'infrastructure', 'ci/cd', 'docker', 'kubernetes', 'terraform', 'cloud ops', 'sre', 'site reliability'],
+            'Data Engineering': ['data engineer', 'data pipeline', 'data warehouse', 'etl', 'data platform'],
+            'Security': ['security', 'cybersecurity', 'cyber', 'infosec', 'penetration test', 'appsec'],
+            'Product Management': ['product manager', 'product management', 'product owner', 'product strategist', 'pm'],
+            'Cloud Engineering': ['cloud engineer', 'cloud architect', 'aws', 'azure', 'gcp'],
+            'Front End': ['frontend', 'front-end', 'front end', 'react', 'vue', 'angular', 'web developer'],
+            'Back End': ['backend', 'back-end', 'back end', 'server', 'api', 'microservices'],
+            'Quality Assurance': ['quality assurance', 'automation test', 'sdet', 'qa', 'test'],
+            'UX/UI Design': ['ux design', 'ui design', 'user experience', 'interaction design', 'product design'],
+            'Research': ['research scientist', 'research engineer', 'research', 'researcher'],
+            'Information Technology': ['information technology', 'it support', 'systems admin', 'it intern', 'network'],
+            'Software Engineering': ['software engineer', 'software development', 'software dev', 'programmer', 'coding', 'developer', 'engineer', 'swe']
         }
         
         # Keywords that indicate freshman-friendly positions
@@ -98,25 +104,111 @@ class OptimizedInternshipScraper:
     
     def parse_location(self, location_text):
         """Parse location handling <br> tags and details"""
+        if not location_text:
+            return ['Remote']
+
         # Handle details/summary for multiple locations
         if '<details>' in location_text:
-            summary_match = re.search(r'<summary>\*\*(\d+)\s+locations?\*\*</summary>', location_text)
-            if summary_match:
-                return [f"{summary_match.group(1)} locations"]
-        
-        # Split by <br> or </br>
-        locations = re.split(r'</?br/?>', location_text)
-        return [loc.strip() for loc in locations if loc.strip()]
+            # Try to find content between </summary> and </details>
+            content_match = re.search(r'</summary>(.*?)(?:</details>|$)', location_text, re.DOTALL)
+
+            if content_match:
+                location_content = content_match.group(1)
+                print(f"Raw location content: '{location_content}'")
+
+                # Split by various br tag formats and clean up
+                locations = re.split(r'</?br\s*/?>', location_content, flags=re.IGNORECASE)
+                cleaned_locations = []
+
+                for loc in locations:
+                    # Clean HTML entities and tags
+                    cleaned = (loc.replace('&nbsp;', ' ')
+                                 .replace('&amp;', '&')
+                                 .replace('&lt;', '<')
+                                 .replace('&gt;', '>')
+                                 .replace('&quot;', '"')
+                                 .strip())
+
+                    # Remove any remaining HTML tags
+                    cleaned = re.sub(r'<[^>]*>', '', cleaned).strip()
+
+                    # Filter out summary text like "**5 locations**" or "5 locations"
+                    if cleaned and not re.match(r'^\*?\*?\d+\s+locations?\*?\*?$', cleaned, re.IGNORECASE):
+                        cleaned_locations.append(cleaned)
+
+                print(f"Parsed locations from details: {cleaned_locations}")
+                return cleaned_locations if cleaned_locations else ['Multiple Locations']
+            else:
+                # If details tag is malformed, try fallback parsing
+                fallback_match = re.search(r'\d+\s+locations.*?>(.*?)(?:<|$)', location_text, re.DOTALL)
+                if fallback_match:
+                    fallback_content = fallback_match.group(1)
+                    locations = re.split(r'</?br\s*/?>', fallback_content, flags=re.IGNORECASE)
+                    cleaned_locations = []
+
+                    for loc in locations:
+                        cleaned = re.sub(r'<[^>]*>', '', loc).strip()
+                        if cleaned and not re.match(r'^\d+\s+locations?$', cleaned, re.IGNORECASE):
+                            cleaned_locations.append(cleaned)
+
+                    if cleaned_locations:
+                        print(f"Parsed locations from malformed details: {cleaned_locations}")
+                        return cleaned_locations
+
+        # Handle regular location text - check for <br> tags
+        if re.search(r'</?br\s*/?>', location_text, re.IGNORECASE):
+            locations = re.split(r'</?br\s*/?>', location_text, flags=re.IGNORECASE)
+            cleaned_locations = []
+
+            for loc in locations:
+                cleaned = re.sub(r'<[^>]*>', '', loc).strip()
+                # Clean HTML entities
+                cleaned = (cleaned.replace('&nbsp;', ' ')
+                                 .replace('&amp;', '&')
+                                 .replace('&lt;', '<')
+                                 .replace('&gt;', '>')
+                                 .replace('&quot;', '"')
+                                 .strip())
+
+                # Filter out location count text
+                if cleaned and not re.match(r'^\*?\*?\d+\s+locations?\*?\*?$', cleaned, re.IGNORECASE):
+                    cleaned_locations.append(cleaned)
+
+            if cleaned_locations:
+                print(f"Parsed locations from br tags: {cleaned_locations}")
+                return cleaned_locations
+
+        # Otherwise clean and parse as single location
+        cleaned = re.sub(r'<[^>]*>', '', location_text).strip()
+        # Clean HTML entities
+        cleaned = (cleaned.replace('&nbsp;', ' ')
+                          .replace('&amp;', '&')
+                          .replace('&lt;', '<')
+                          .replace('&gt;', '>')
+                          .replace('&quot;', '"')
+                          .strip())
+
+        # Skip if it contains location count pattern (parsing failed)
+        if re.match(r'^\*?\*?\d+\s+locations?\*?\*?', cleaned, re.IGNORECASE) or 'location' in cleaned.lower():
+            print(f"Failed to parse location: {cleaned}")
+            return ['Multiple Locations']
+
+        return [cleaned] if cleaned else ['Remote']
     
     def categorize_role(self, role):
-        """Categorize role based on keywords"""
+        """Categorize role using word boundary matching to prevent false positives"""
+        import re
         role_lower = role.lower()
-        
-        # Check each category
+
+        # Use word boundary matching to prevent false positives
+        # Example: "equipment" contains "ui" but shouldn't match "Front End"
         for category, keywords in self.role_categories.items():
-            if any(keyword in role_lower for keyword in keywords):
-                return category
-        
+            for keyword in keywords:
+                # Use word boundaries \b for exact word matching
+                pattern = r'\b' + re.escape(keyword) + r'\b'
+                if re.search(pattern, role_lower, re.IGNORECASE):
+                    return category
+
         return 'Other'
     
     def is_freshman_friendly(self, role_text, company_text):
@@ -158,43 +250,86 @@ class OptimizedInternshipScraper:
         
         return False
     
-    def parse_requirements(self, role_text, application_text):
+    def parse_requirements(self, role_text, application_text, company_html=""):
         """Parse citizenship and sponsorship requirements"""
-        combined_text = f"{role_text} {application_text}"
-        
+        combined_text = f"{role_text} {application_text} {company_html}"
+
+        # Enhanced fire emoji detection - check original HTML too
+        is_faang = ('🔥' in combined_text or
+                   '\\ud83d\\udd25' in combined_text or
+                   '\ud83d\udd25' in combined_text)
+
         return {
             'requires_citizenship': '🇺🇸' in combined_text,
             'no_sponsorship': '🛂' in combined_text,
             'is_closed': '🔒' in combined_text,
-            'is_faang': '🔥' in combined_text,
+            'is_faang': is_faang,
             'requires_advanced_degree': '🎓' in combined_text
         }
     
+    def extract_company_from_html(self, html):
+        """Enhanced company extraction that handles <strong> tags and <a> tags properly"""
+        import re
+
+        # First, check if there's a <strong> tag and extract its content
+        strong_match = re.search(r'<strong>(.*?)</strong>', html)
+        if strong_match:
+            # Extract the company name from within <strong> tags
+            company = strong_match.group(1).strip()
+
+            # Strip any <a> tags from within the <strong> content, keeping only the text
+            company = re.sub(r'<a[^>]*>(.*?)</a>', r'\1', company)
+
+            # Clean any remaining HTML entities
+            company = (company.replace('&nbsp;', ' ')
+                             .replace('&amp;', '&')
+                             .replace('&lt;', '<')
+                             .replace('&gt;', '>')
+                             .replace('&quot;', '"')
+                             .strip())
+            return company
+
+        # Check for <a> tags at the top level (outside of <strong>)
+        a_tag_match = re.search(r'<a[^>]*>(.*?)</a>', html)
+        if a_tag_match:
+            company = a_tag_match.group(1).strip()
+            # Clean any remaining HTML entities
+            company = (company.replace('&nbsp;', ' ')
+                             .replace('&amp;', '&')
+                             .replace('&lt;', '<')
+                             .replace('&gt;', '>')
+                             .replace('&quot;', '"')
+                             .strip())
+            return company
+
+        # If no <strong> or <a> tags, use standard extraction
+        return re.sub(r'<[^>]+>', '', html).strip()
+
     def parse_html_table_row(self, line):
         """Parse HTML table row to extract cell contents"""
         # Extract content between <td> tags
         cells = re.findall(r'<td[^>]*>(.*?)</td>', line, re.DOTALL)
         if len(cells) < 5:
             return None
-        
+
         # Extract text content from HTML
         company_html, role_html, location_html, application_html, age_html = cells
-        
-        # Clean company name (remove <strong> tags)
-        company = re.sub(r'<[^>]+>', '', company_html).strip()
-        
+
+        # Clean company name using enhanced function for <strong> tags
+        company = self.extract_company_from_html(company_html)
+
         # Clean role (preserve emojis)
         role = re.sub(r'<[^>]+>', '', role_html).strip()
-        
+
         # Clean location
         location = location_html.strip()
-        
+
         # Application stays as HTML to extract links
         application = application_html.strip()
-        
+
         # Age becomes date_posted
         date_posted = re.sub(r'<[^>]+>', '', age_html).strip()
-        
+
         return company, role, location, application, date_posted
     
     def parse_internships(self, content):
@@ -211,36 +346,43 @@ class OptimizedInternshipScraper:
         
         # Process each table row
         for row in table_rows:
+            # First extract the raw cells to get company HTML
+            raw_cells = re.findall(r'<td[^>]*>(.*?)</td>', f'<tr>{row}</tr>', re.DOTALL)
+            if len(raw_cells) < 5:
+                continue
+
+            company_html = raw_cells[0]  # Raw company cell HTML
+
             # Parse HTML table row
             row_data = self.parse_html_table_row(f'<tr>{row}</tr>')
             if not row_data:
                 continue
-            
+
             company, role, location, application, date_posted = row_data
-            
-            # Clean text fields
-            company = self.clean_text(company)
+
+            # Extract company from HTML properly (handles <strong> tags)
+            company = self.extract_company_from_html(company_html)
             role = self.clean_text(role)
-            
+
             # Skip if company is empty (likely header row)
             if not company:
                 continue
-            
+
             # Handle subsidiary companies (↳)
             is_subsidiary = company.startswith('↳')
             if is_subsidiary:
                 company = current_company
             else:
                 current_company = company
-            
+
             # Parse location
             locations = self.parse_location(location)
-            
+
             # Extract application link
             app_link = self.extract_application_link(application)
-            
-            # Parse requirements
-            requirements = self.parse_requirements(role, application)
+
+            # Parse requirements (pass raw company HTML for better emoji detection)
+            requirements = self.parse_requirements(role, application, company_html)
             
             # Skip if closed (optional - you might want to keep for tracking)
             if requirements['is_closed']:

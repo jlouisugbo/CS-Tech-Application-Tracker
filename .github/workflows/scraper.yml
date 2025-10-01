@@ -2,14 +2,47 @@ name: Internship Scraper
 
 on:
   schedule:
-    - cron: '*/30 * * * *'
-  workflow_dispatch:
+    - cron: '*/30 * * * *'  # Run every 30 minutes
+  workflow_dispatch:        # Allow manual trigger
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
+    timeout-minutes: 10     # Set reasonable timeout
     steps:
-      - name: Trigger scraper
+      - name: Trigger scraper API
         run: |
-          curl -X GET "${{ secrets.DEPLOY_URL }}/api/scrape?CRON_SECRET=${{ secrets.CRON_SECRET }}" \
-            -f || echo "Scrape request sent"
+          echo "🔄 Starting internship scrape..."
+
+          # Make POST request with proper authentication header
+          response=$(curl -w "%{http_code}" -o response.json -s -X POST \
+            "${{ secrets.DEPLOY_URL }}/api/scrape" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -H "User-Agent: GitHub-Actions-Scraper/1.0")
+
+          echo "📊 HTTP Status: $response"
+
+          if [ "$response" -eq 200 ]; then
+            echo "✅ Scraper completed successfully"
+            # Show response summary
+            if command -v jq &> /dev/null; then
+              cat response.json | jq -r '.message // "No message"'
+              echo "📈 Internships found: $(cat response.json | jq -r '.internships // 0')"
+            else
+              echo "Response: $(cat response.json)"
+            fi
+          elif [ "$response" -eq 401 ]; then
+            echo "❌ Authentication failed - check CRON_SECRET"
+            exit 1
+          elif [ "$response" -eq 500 ]; then
+            echo "🚨 Server error occurred"
+            cat response.json || echo "No error details available"
+            exit 1
+          else
+            echo "⚠️ Unexpected status code: $response"
+            cat response.json || echo "No response body"
+            exit 1
+          fi
+
+          echo "🏁 Scrape workflow completed"

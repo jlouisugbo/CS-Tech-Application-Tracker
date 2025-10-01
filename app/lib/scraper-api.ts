@@ -1,6 +1,129 @@
 // Server-side scraper logic for API routes
 import { supabaseAdmin } from './supabaseAdmin';
 
+// Location alias map for normalization and deduplication
+const LOCATION_ALIASES: Record<string, string> = {
+  // New York variations
+  'nyc': 'New York, NY',
+  'new york': 'New York, NY',
+  'new york city': 'New York, NY',
+  'new york, ny': 'New York, NY',
+  'new york city, ny': 'New York, NY',
+  'manhattan': 'New York, NY',
+  'manhattan, ny': 'New York, NY',
+  'brooklyn': 'New York, NY',
+  'brooklyn, ny': 'New York, NY',
+
+  // San Francisco variations
+  'sf': 'San Francisco, CA',
+  'san francisco': 'San Francisco, CA',
+  'san francisco, ca': 'San Francisco, CA',
+  'san fran': 'San Francisco, CA',
+
+  // Bay Area
+  'bay area': 'San Francisco Bay Area, CA',
+  'silicon valley': 'San Francisco Bay Area, CA',
+  'palo alto': 'Palo Alto, CA',
+  'palo alto, ca': 'Palo Alto, CA',
+  'mountain view': 'Mountain View, CA',
+  'mountain view, ca': 'Mountain View, CA',
+  'sunnyvale': 'Sunnyvale, CA',
+  'sunnyvale, ca': 'Sunnyvale, CA',
+  'san jose': 'San Jose, CA',
+  'san jose, ca': 'San Jose, CA',
+  'cupertino': 'Cupertino, CA',
+  'cupertino, ca': 'Cupertino, CA',
+  'menlo park': 'Menlo Park, CA',
+  'menlo park, ca': 'Menlo Park, CA',
+  'redwood city': 'Redwood City, CA',
+  'redwood city, ca': 'Redwood City, CA',
+
+  // Los Angeles variations
+  'la': 'Los Angeles, CA',
+  'los angeles': 'Los Angeles, CA',
+  'los angeles, ca': 'Los Angeles, CA',
+
+  // Seattle variations
+  'seattle': 'Seattle, WA',
+  'seattle, wa': 'Seattle, WA',
+  'bellevue': 'Bellevue, WA',
+  'bellevue, wa': 'Bellevue, WA',
+  'redmond': 'Redmond, WA',
+  'redmond, wa': 'Redmond, WA',
+
+  // Boston variations
+  'boston': 'Boston, MA',
+  'boston, ma': 'Boston, MA',
+  'cambridge': 'Cambridge, MA',
+  'cambridge, ma': 'Cambridge, MA',
+
+  // Chicago variations
+  'chicago': 'Chicago, IL',
+  'chicago, il': 'Chicago, IL',
+
+  // Austin variations
+  'austin': 'Austin, TX',
+  'austin, tx': 'Austin, TX',
+
+  // Dallas variations
+  'dallas': 'Dallas, TX',
+  'dallas, tx': 'Dallas, TX',
+
+  // Houston variations
+  'houston': 'Houston, TX',
+  'houston, tx': 'Houston, TX',
+
+  // Washington DC variations
+  'dc': 'Washington, DC',
+  'washington dc': 'Washington, DC',
+  'washington, dc': 'Washington, DC',
+  'washington d.c.': 'Washington, DC',
+  'arlington': 'Arlington, VA',
+  'arlington, va': 'Arlington, VA',
+
+  // Atlanta variations
+  'atlanta': 'Atlanta, GA',
+  'atlanta, ga': 'Atlanta, GA',
+
+  // Denver variations
+  'denver': 'Denver, CO',
+  'denver, co': 'Denver, CO',
+
+  // Remote variations
+  'remote': 'Remote',
+  'remote in usa': 'Remote',
+  'remote us': 'Remote',
+  'remote usa': 'Remote',
+  'work from home': 'Remote',
+  'wfh': 'Remote',
+
+  // International
+  'london': 'London, UK',
+  'london, uk': 'London, UK',
+  'toronto': 'Toronto, ON',
+  'toronto, on': 'Toronto, ON',
+  'vancouver': 'Vancouver, BC',
+  'vancouver, bc': 'Vancouver, BC',
+};
+
+/**
+ * Normalize location strings to prevent duplicates and enable smart matching
+ * Examples: "NYC" → "New York, NY", "SF" → "San Francisco, CA"
+ */
+function normalizeLocation(location: string): string {
+  if (!location) return 'Remote';
+
+  const normalized = location.toLowerCase().trim();
+
+  // Check if we have an exact alias match
+  if (LOCATION_ALIASES[normalized]) {
+    return LOCATION_ALIASES[normalized];
+  }
+
+  // If no alias found, return original with proper trim
+  return location.trim();
+}
+
 interface ScraperResult {
   success: boolean;
   internshipsFound?: number;
@@ -112,7 +235,7 @@ export async function runScraperAPI(): Promise<ScraperResult> {
     });
     console.log(`📊 After removing exact duplicates: ${deduplicatedInternships.length}`);
     
-    // Skip application link checking for faster testing
+    // Check application links for closed internships
     console.log('🔗 Checking application links for closed internships...');
     const checkedInternships = await checkApplicationLinks(deduplicatedInternships);
 
@@ -168,7 +291,7 @@ export async function runScraperAPI(): Promise<ScraperResult> {
         is_subsidiary: internship.is_subsidiary || false,
         is_freshman_friendly: internship.is_freshman_friendly || false,
         is_closed: internship.is_closed || false,
-        is_active: true,
+        is_active: !internship.is_closed,
         source: internship.source,
         last_seen: now,
         created_at: existing?.created_at || now // Preserve original creation time
@@ -394,59 +517,81 @@ function parseDaysAgo(dateText: string): number {
 
 function parseLocations(locationText: string): string[] {
   if (!locationText) return ['Remote'];
-  
+
   // Handle details/summary format like: <details><summary>**5 locations**</summary>Southlake, TX</br>Austin, TX</br>Westlake, TX</br>Ann Arbor, MI</br>Indianapolis, IN</details>
   if (locationText.includes('<details>')) {
-    const contentMatch = locationText.match(/<\/summary>(.*?)<\/details>/s);
-    
+    // Try to find content between </summary> and </details>
+    const contentMatch = locationText.match(/<\/summary>(.*?)(<\/details>|$)/s);
+
     if (contentMatch) {
       const locationContent = contentMatch[1];
       console.log(`Raw location content: "${locationContent}"`);
-      
-      // Split by </br> or <br> tags and clean up
+
+      // Split by various br tag formats and clean up
       const locations = locationContent
-        .split(/<\/?br\/?>/i)
-        .map(loc => loc.trim())
-        .filter(loc => loc.length > 0)
+        .split(/<\/?br\s*\/?>/i)
         .map(loc => {
-          // Clean up any remaining HTML entities or tags
-          return loc.replace(/&[a-zA-Z0-9#]+;/g, '').replace(/<[^>]*>/g, '').trim();
-        });
-      
+          // Clean HTML entities first
+          let cleaned = loc
+            .replace(/&nbsp;/g, ' ')
+            .replace(/&amp;/g, '&')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&quot;/g, '"')
+            .replace(/<[^>]*>/g, '') // Remove any remaining HTML tags
+            .trim();
+          return cleaned;
+        })
+        .filter(loc => loc.length > 0 && !loc.match(/^\*?\*?\d+\s+locations?\*?\*?$/i)); // Filter out summary text like "**5 locations**"
+
       console.log(`Parsed locations from details: [${locations.map(l => `"${l}"`).join(', ')}]`);
       return locations.length > 0 ? locations : ['Multiple Locations'];
+    } else {
+      // If details tag is malformed or incomplete, try to extract any text after "locations"
+      const fallbackMatch = locationText.match(/\d+\s+locations.*?>(.*?)(<|$)/s);
+      if (fallbackMatch) {
+        const fallbackContent = fallbackMatch[1];
+        const locations = fallbackContent
+          .split(/<\/?br\s*\/?>/i)
+          .map(loc => cleanText(loc))
+          .filter(loc => loc.length > 0 && !loc.match(/^\d+\s+locations?$/i));
+
+        if (locations.length > 0) {
+          console.log(`Parsed locations from malformed details: [${locations.map(l => `"${l}"`).join(', ')}]`);
+          return locations;
+        }
+      }
     }
   }
-  
+
   // Handle regular location text - check for <br> tags first
   let processedText = locationText;
-  
+
   // If there are <br> tags, split by them first
-  if (processedText.match(/<\/?br\/?>/i)) {
+  if (processedText.match(/<\/?br\s*\/?>/i)) {
     const locations = processedText
-      .split(/<\/?br\/?>/i)
+      .split(/<\/?br\s*\/?>/i)
       .map(loc => cleanText(loc))
-      .filter(loc => loc.length > 0 && !loc.match(/^\d+\s+locations?$/i));
-    
+      .filter(loc => loc.length > 0 && !loc.match(/^\*?\*?\d+\s+locations?\*?\*?$/i));
+
     if (locations.length > 0) {
       console.log(`Parsed locations from br tags: [${locations.map(l => `"${l}"`).join(', ')}]`);
       return locations;
     }
   }
-  
+
   // Otherwise clean and parse normally
   const cleaned = cleanText(processedText);
-  
-  // Skip if it still contains "locations" (means parsing failed)
-  if (cleaned.includes('locations') || cleaned.includes('location')) {
+
+  // Skip if it still contains "locations" pattern (means parsing failed)
+  if (cleaned.match(/^\*?\*?\d+\s+locations?\*?\*?/i) || cleaned.toLowerCase().includes('location')) {
     console.warn(`Failed to parse location: ${cleaned}`);
     return ['Multiple Locations'];
   }
-  
+
   // For single locations or simple comma-separated, just return as-is
-  // Don't try to fix concatenated state codes here - that should be handled earlier
   const locations = [cleaned].filter(loc => loc.length > 0);
-  
+
   return locations.length > 0 ? locations : ['Remote'];
 }
 
@@ -623,16 +768,26 @@ function detectRequirements(text: string): {
 
 function cleanText(text: string): string {
   if (!text) return '';
-  
+
   // Remove markdown links but keep the text
   let cleaned = text.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
-  
+
   // Remove HTML tags
   cleaned = cleaned.replace(/<[^>]*>/g, '');
-  
+
+  // Clean HTML entities
+  cleaned = cleaned
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'");
+
   // Clean up extra spaces
   cleaned = cleaned.replace(/\s+/g, ' ').trim();
-  
+
   return cleaned;
 }
 
@@ -662,39 +817,57 @@ function extractLink(cell: string): string | null {
   return null;
 }
 
+/**
+ * Categorize role using word boundary matching to prevent false positives
+ * Example: "equipment" contains "ui" but shouldn't match "Front End"
+ */
 function categorizeRole(role: string): string {
   if (!role) return 'Other';
-  
+
   const lowerRole = role.toLowerCase();
-  
-  // Comprehensive categorization
+
+  // PRIORITY ORDER: Most specific categories first to prevent false matches
   const categories = {
-    'Software Engineering': ['software engineer', 'swe', 'software development', 'software dev', 'programmer', 'coding'],
+    // VERY SPECIFIC CATEGORIES (check these first)
+    'Quant/Trading': ['quant', 'quantitative', 'trading', 'algorithmic trading', 'financial engineering', 'prop trading', 'proprietary trading'],
+    'Hardware Engineering': ['hardware engineer', 'hardware', 'electrical engineer', 'electrical', 'embedded', 'firmware', 'semiconductor', 'asic', 'vlsi', 'circuit design', 'chip design', 'pcb', 'fpga', 'rtl', 'verilog', 'equipment engineering', 'test engineer'],
+    'AI/ML': ['artificial intelligence', 'machine learning', 'deep learning', 'neural network', 'computer vision', 'generative ai', 'llm', 'ai', 'ml', 'nlp'],
+
+    // MODERATELY SPECIFIC
     'Full Stack': ['full stack', 'fullstack', 'full-stack'],
-    'Front End': ['frontend', 'front-end', 'front end', 'ui', 'user interface', 'react', 'vue', 'angular'],
-    'Back End': ['backend', 'back-end', 'back end', 'server', 'api', 'database', 'microservices'],
-    'AI/ML': ['ai', 'artificial intelligence', 'ml', 'machine learning', 'deep learning', 'neural network', 'nlp', 'computer vision'],
+    'Mobile': ['mobile', 'ios', 'android', 'react native', 'flutter', 'swift', 'kotlin'],
+    'DevOps': ['devops', 'infrastructure', 'ci/cd', 'docker', 'kubernetes', 'terraform', 'cloud ops', 'sre', 'site reliability'],
     'Data Science': ['data science', 'data scientist', 'predictive analytics', 'statistical analysis'],
     'Data Engineering': ['data engineer', 'data pipeline', 'data warehouse', 'etl', 'data platform'],
-    'DevOps': ['devops', 'infrastructure', 'ci/cd', 'docker', 'kubernetes', 'terraform', 'cloud ops'],
-    'Mobile': ['mobile', 'ios', 'android', 'react native', 'flutter', 'swift', 'kotlin'],
-    'Security': ['security', 'cybersecurity', 'cyber', 'infosec', 'penetration test'],
-    'Product Management': ['product manager', 'product management', 'pm', 'product owner'],
-    'Quant/Trading': ['quant', 'quantitative', 'trading', 'algorithmic trading', 'financial engineering'],
-    'Research': ['research', 'researcher', 'research scientist', 'r&d', 'research engineer'],
-    'Hardware Engineering': ['hardware', 'hardware engineer', 'electrical', 'embedded', 'firmware'],
-    'Cloud Engineering': ['cloud', 'aws', 'azure', 'gcp', 'cloud engineer', 'cloud architect'],
-    'Information Technology': ['information technology', 'it', 'it support', 'systems admin'],
-    'Quality Assurance': ['qa', 'quality assurance', 'test', 'testing', 'automation test', 'sdet'],
-    'UX/UI Design': ['ux', 'ui', 'user experience', 'design', 'interaction design']
+    'Security': ['security', 'cybersecurity', 'cyber', 'infosec', 'penetration test', 'appsec', 'application security'],
+    'Product Management': ['product manager', 'product management', 'product owner', 'product strategist'],
+    'Cloud Engineering': ['cloud engineer', 'cloud architect', 'aws', 'azure', 'gcp'],
+
+    // SPECIFIC BUT COMMON
+    'Front End': ['frontend', 'front-end', 'front end', 'react', 'vue', 'angular', 'web developer'],
+    'Back End': ['backend', 'back-end', 'back end', 'server', 'api', 'microservices'],
+    'Quality Assurance': ['quality assurance', 'automation test', 'sdet', 'qa', 'test'],
+    'UX/UI Design': ['ux design', 'ui design', 'user experience', 'interaction design', 'product design'],
+    'Research': ['research scientist', 'research engineer', 'research', 'researcher'],
+    'Information Technology': ['information technology', 'it support', 'systems admin'],
+
+    // MOST GENERIC (check last)
+    'Software Engineering': ['software engineer', 'software development', 'software dev', 'programmer', 'coding', 'developer', 'engineer', 'swe']
   };
-  
+
+  // Use WORD BOUNDARY matching to prevent false positives
   for (const [category, keywords] of Object.entries(categories)) {
-    if (keywords.some(keyword => lowerRole.includes(keyword))) {
-      return category;
+    for (const keyword of keywords) {
+      // Escape special regex characters and use word boundaries
+      const escapedKeyword = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const pattern = new RegExp(`\\b${escapedKeyword}\\b`, 'i');
+
+      if (pattern.test(lowerRole)) {
+        return category;
+      }
     }
   }
-  
+
   return 'Other';
 }
 
@@ -973,7 +1146,8 @@ function parseSimplifyJobsMarkdown(content: string): any[] {
       // Parse the row
       const internship = parseSimplifyJobRow(rowContent, lastMainCompany);
       if (internship) {
-        if (internship.company && internship.company !== '↳') {
+        // Only update lastMainCompany if this is NOT a subsidiary and has valid company
+        if (!internship.is_subsidiary && internship.company && internship.company.trim() !== '') {
           lastMainCompany = internship.company;
         }
         internships.push(internship);
@@ -1000,14 +1174,21 @@ function parseSimplifyJobRow(rowHtml: string, lastMainCompany: string): any | nu
       return null; // Need at least Company, Role, Location, Application
     }
     
-    // Extract company name
-    let company = extractTextFromHtml(cells[0]);
+    // Extract company name using enhanced function for <strong> tags
+    let company = extractCompanyFromHtml(cells[0]);
     let isSubsidiary = false;
-    
-    // Handle subsidiary companies (↳ symbol)
-    if (company === '↳' || company.includes('↳')) {
-      company = lastMainCompany;
-      isSubsidiary = true;
+
+    // Handle subsidiary companies (↳ symbol) with validation
+    // Check for ↳ symbol OR empty string OR whitespace-only after emoji stripping
+    if (!company || company === '↳' || company.includes('↳') || company.trim() === '') {
+      if (lastMainCompany && lastMainCompany.trim() !== '') {
+        company = lastMainCompany;
+        isSubsidiary = true;
+      } else {
+        // No valid parent company available, skip this row
+        console.warn('⚠️ Subsidiary company found but no parent company available, skipping row');
+        return null;
+      }
     }
     
     // Extract role
@@ -1015,35 +1196,104 @@ function parseSimplifyJobRow(rowHtml: string, lastMainCompany: string): any | nu
     
     // Extract location(s) - handle multiple locations separated by <br>
     let locationText = cells[2];
-    const locations = locationText
-      .split(/<br\s*\/?>/i)
+    let locations: string[] = [];
+    let expectedLocationCount: number | null = null;
+
+    // Handle <details> tags - extract count and content
+    if (locationText.includes('<details>')) {
+      // Step 1: Extract expected count from <summary><strong>X locations</strong></summary>
+      const summaryMatch = locationText.match(/<summary>.*?<strong>\s*(\d+)\s+locations?\s*<\/strong>.*?<\/summary>/i);
+      if (summaryMatch) {
+        expectedLocationCount = parseInt(summaryMatch[1], 10);
+      }
+
+      // Step 2: Extract content after </summary> tag
+      const summaryEndMatch = locationText.match(/<\/summary>([\s\S]*?)<\/details>/i);
+      if (summaryEndMatch) {
+        locationText = summaryEndMatch[1].trim();
+      }
+    }
+
+    // Step 3: Split by ALL br tag variations: <br>, <br/>, </br>, <br />
+    locations = locationText
+      .split(/<\/?br\s*\/?>/i)  // ✅ Now matches </br> too!
       .map(loc => extractTextFromHtml(loc).trim())
-      .filter(loc => loc.length > 0);
+      .filter(loc => loc.length > 0 && !loc.toLowerCase().includes('locations'));
+
+    // If no locations found after splitting, try extracting plain text
+    if (locations.length === 0) {
+      const plainLocation = extractTextFromHtml(locationText).trim();
+      if (plainLocation && plainLocation.length > 0) {
+        locations = [plainLocation];
+      }
+    }
+
+    // Step 4: Normalize locations to prevent duplicates (NYC → New York, NY)
+    locations = locations.map(loc => normalizeLocation(loc));
+
+    // Step 5: Remove duplicates after normalization
+    locations = [...new Set(locations)];
+
+    // Step 6: Validate parsed count matches expected count
+    if (expectedLocationCount !== null) {
+      if (locations.length !== expectedLocationCount) {
+        console.warn(`⚠️ Location count mismatch for ${company}: Expected ${expectedLocationCount}, got ${locations.length}`);
+        console.warn(`   Locations parsed: [${locations.join(', ')}]`);
+      } else {
+        console.log(`✅ Validated ${locations.length} locations for ${company}`);
+      }
+    }
     
     // Extract application link - get the first non-simplify link
     const applicationCell = cells[3];
     const linkMatch = applicationCell.match(/href="([^"]*)"[^>]*><img[^>]*alt="Apply"/i);
     let applicationLink = linkMatch ? linkMatch[1] : null;
-    
-    // Skip simplify.jobs links, get direct application links
-    if (applicationLink && applicationLink.includes('simplify.jobs')) {
-      applicationLink = null;
+
+    // Try to get direct application link, but keep Simplify as fallback
+    // Look for the first href that isn't a Simplify tracking link
+    const allLinks = applicationCell.match(/href="([^"]*)"/g);
+    if (allLinks && allLinks.length > 0) {
+      for (const link of allLinks) {
+        const url = link.match(/href="([^"]*)"/)?.[1];
+        if (url && !url.includes('simplify.jobs/p/') && !url.includes('utm_source')) {
+          applicationLink = url;
+          break;
+        }
+      }
     }
+
+    // Extract age/date posted and calculate days_ago
+    const ageText = cells[4] ? extractTextFromHtml(cells[4]) : 'Unknown';
+    const daysAgo = ageText.match(/(\d+)d/) ? parseInt(ageText.match(/(\d+)d/)![1], 10) : 9999;
     
-    // Extract age/date posted
-    const ageText = cells[4] ? extractTextFromHtml(cells[4]).replace('d', ' days ago') : 'Unknown';
-    
-    // Determine categories and requirements from emojis and text  
+    // Determine categories and requirements from emojis and text
     // Search the full row HTML for emojis (including company cell and role cell)
     const fullRowText = rowHtml;
-    const requiresCitizenship = fullRowText.includes('🇺🇸') || fullRowText.includes('requires u.s. citizenship') || 
-                               fullRowText.includes('\\ud83c\\uddfa\\ud83c\\uddf8') || fullRowText.includes('\ud83c\uddfa\ud83c\uddf8');
+    const companyCell = cells[0]; // Raw company cell HTML for better emoji detection
+    const roleCell = cells[1]; // Raw role cell HTML for emoji detection
+
+    // Check for citizenship requirements (🇺🇸 emoji or text) - can be in company or role cell
+    const requiresCitizenship = fullRowText.includes('🇺🇸') || fullRowText.includes('requires u.s. citizenship') ||
+                               fullRowText.includes('\\ud83c\\uddfa\\ud83c\\uddf8') || fullRowText.includes('\ud83c\uddfa\ud83c\uddf8') ||
+                               companyCell.includes('🇺🇸') || roleCell.includes('🇺🇸');
+
+    // Check for no sponsorship (🛂 emoji or text) - usually in role cell
     const noSponsorship = fullRowText.includes('🛂') || fullRowText.includes('does not offer sponsorship') ||
-                         fullRowText.includes('\\ud83d\\udec2') || fullRowText.includes('\ud83d\udec2');
+                         fullRowText.includes('\\ud83d\\udec2') || fullRowText.includes('\ud83d\udec2') ||
+                         roleCell.includes('🛂') || companyCell.includes('🛂');
+
+    // Check for closed applications (🔒 emoji or text)
     const isClosed = fullRowText.includes('🔒') || fullRowText.includes('application is closed') ||
                     fullRowText.includes('\\ud83d\\udd12') || fullRowText.includes('\ud83d\udd12');
-    const isFaang = fullRowText.includes('🔥') || fullRowText.includes('\\ud83d\\udd25') || fullRowText.includes('\ud83d\udd25');
-    const requiresAdvancedDegree = fullRowText.includes('🎓') || fullRowText.includes('\\ud83c\\udf93') || fullRowText.includes('\ud83c\udf93');
+
+    // Enhanced fire emoji detection (🔥) - usually in company cell for FAANG
+    const isFaang = companyCell.includes('🔥') || fullRowText.includes('🔥') ||
+                   fullRowText.includes('\\ud83d\\udd25') || fullRowText.includes('\ud83d\udd25') ||
+                   companyCell.includes('\\ud83d\\udd25') || companyCell.includes('\ud83d\udd25');
+
+    // Check for advanced degree requirement (🎓 emoji) - usually in role cell
+    const requiresAdvancedDegree = fullRowText.includes('🎓') || fullRowText.includes('\\ud83c\\udf93') || fullRowText.includes('\ud83c\udf93') ||
+                                  roleCell.includes('🎓');
     
     // Categorize the role
     const category = categorizeRole(role);
@@ -1059,6 +1309,7 @@ function parseSimplifyJobRow(rowHtml: string, lastMainCompany: string): any | nu
       locations: locations.length > 0 ? locations : ['Remote'],
       application_link: applicationLink,
       date_posted: ageText,
+      days_ago: daysAgo,
       requires_citizenship: requiresCitizenship,
       no_sponsorship: noSponsorship,
       is_subsidiary: isSubsidiary,
@@ -1086,4 +1337,61 @@ function extractTextFromHtml(html: string): string {
     // Remove other common emojis
     .replace(/[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F700}-\u{1F77F}]|[\u{1F780}-\u{1F7FF}]|[\u{1F800}-\u{1F8FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu, '')
     .trim();
+}
+
+// Enhanced function specifically for extracting company names that handles <strong> tags, <a> tags and emojis properly
+// Handles all these patterns:
+// 1. <strong>Slack</strong>
+// 2. <strong><a>TikTok</a></strong>
+// 3. 🔥 <strong>Slack</strong>
+// 4. 🔥 <strong><a>TikTok</a></strong>
+// 5. <a>Company</a> (no strong)
+// 6. 🔥 <a>Company</a> (emoji + anchor, no strong)
+function extractCompanyFromHtml(html: string): string {
+  let company = '';
+
+  // Strategy: Extract content from innermost tag, then strip emojis from the result
+
+  // First, try to find <strong> tag content
+  const strongMatch = html.match(/<strong>(.*?)<\/strong>/);
+  if (strongMatch) {
+    company = strongMatch[1].trim();
+
+    // If there's an <a> tag inside <strong>, extract from that
+    const innerAnchor = company.match(/<a[^>]*>(.*?)<\/a>/);
+    if (innerAnchor) {
+      company = innerAnchor[1].trim();
+    } else {
+      // Remove any remaining HTML tags
+      company = company.replace(/<[^>]*>/g, '').trim();
+    }
+  } else {
+    // No <strong> tag, look for <a> tag directly
+    const anchorMatch = html.match(/<a[^>]*>(.*?)<\/a>/);
+    if (anchorMatch) {
+      company = anchorMatch[1].trim();
+    } else {
+      // No structured tags, extract all text
+      company = extractTextFromHtml(html);
+    }
+  }
+
+  // Clean HTML entities
+  company = company
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'");
+
+  // Remove ALL emojis (including fire, graduation cap, flags, etc.)
+  // This handles emojis that were before/after/inside the tags
+  company = company
+    .replace(/🔥|🎓|🇺🇸|🛂|🔒|↳/g, '')
+    .replace(/[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F700}-\u{1F77F}]|[\u{1F780}-\u{1F7FF}]|[\u{1F800}-\u{1F8FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu, '')
+    .trim();
+
+  return company;
 }

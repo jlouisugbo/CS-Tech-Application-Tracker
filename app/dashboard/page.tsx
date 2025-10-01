@@ -7,11 +7,54 @@ import { useSavedInternships, useAuth } from '../lib/hooks';
 import { InternshipCard } from '../components/InternshipCard';
 import { ApplicationTracker } from '../components/ApplicationTracker';
 import { ApplicationAnalytics } from '../components/ApplicationAnalytics';
+import { ExportButtons } from '../components/ExportButtons';
 
 export default function DashboardPage() {
-  const { user } = useAuth();
+  const { user, loading: authLoading, initializing, sessionError } = useAuth();
   const { savedInternships, loading, error, updateApplicationStatus, addNote, markLinkClicked } = useSavedInternships();
   const [activeTab, setActiveTab] = useState<'overview' | 'tracker' | 'analytics'>('overview');
+
+  // Show loading state while auth is initializing
+  if (initializing || authLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <Header />
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-yellow-600 mx-auto"></div>
+            <h3 className="mt-4 text-lg font-medium text-gray-900">Loading...</h3>
+            <p className="mt-2 text-sm text-gray-500">
+              Please wait while we verify your authentication.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show session error if exists
+  if (sessionError) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <Header />
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+          <div className="text-center">
+            <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-red-100">
+              <BookmarkIcon className="h-6 w-6 text-red-600" />
+            </div>
+            <h3 className="mt-4 text-lg font-medium text-gray-900">Authentication Error</h3>
+            <p className="mt-2 text-sm text-gray-500">{sessionError}</p>
+            <button
+              onClick={() => window.location.reload()}
+              className="mt-4 bg-yellow-600 text-white px-4 py-2 rounded-md hover:bg-yellow-700 transition-colors"
+            >
+              Refresh Page
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!user) {
     return (
@@ -37,10 +80,15 @@ export default function DashboardPage() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900">Your Dashboard</h1>
-          <p className="mt-2 text-gray-600">
-            Manage your saved internships and track your applications
-          </p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-bold text-gray-900">Your Dashboard</h1>
+              <p className="mt-2 text-gray-600">
+                Manage your saved internships and track your applications
+              </p>
+            </div>
+            <ExportButtons savedOnly={true} userId={user.id} variant="compact" />
+          </div>
         </div>
 
         {/* Tab Navigation */}

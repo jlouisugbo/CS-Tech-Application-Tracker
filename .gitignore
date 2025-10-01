@@ -44,3 +44,14 @@ out/
 .next/server/
 .next/static/
 .next/trace
+
+# Misc build files
+nul
+*.tsbuildinfo
+
+# Test files
+test-*.js
+test-*.ts
+
+# Vercel
+.vercel

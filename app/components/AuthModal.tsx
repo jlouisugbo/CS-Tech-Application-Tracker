@@ -1,13 +1,19 @@
+"use client"
+
 import React, { useState, useEffect } from 'react';
 import { X, Mail, Lock, User, GraduationCap, CheckCircle, AlertCircle } from 'lucide-react';
 import { useAuth } from '../lib/hooks';
+import { setGuestApplyPreference } from '../lib/auth-utils';
 
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
+  // Optional context: when modal is opened from Apply flow
+  reason?: 'apply';
+  onContinueAsGuest?: (dontAskAgain: boolean) => void;
 }
 
-export function AuthModal({ isOpen, onClose }: AuthModalProps) {
+export function AuthModal({ isOpen, onClose, reason, onContinueAsGuest }: AuthModalProps) {
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -16,6 +22,7 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [validationErrors, setValidationErrors] = useState<{[key: string]: string}>({});
+  const [dontAskAgain, setDontAskAgain] = useState(false);
   
   const { signIn, signUp } = useAuth();
 
@@ -80,7 +87,7 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
     setLoading(true);
 
     try {
-      const { error: authError } = isSignUp 
+      const { error: authError } = isSignUp
         ? await signUp(email, password)
         : await signIn(email, password);
 
@@ -89,18 +96,23 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
       } else {
         if (isSignUp) {
           setSuccess('Account created successfully! Please check your email to verify your account.');
+          // Clear form after successful signup
+          setEmail('');
+          setPassword('');
+          setConfirmPassword('');
           setTimeout(() => {
             onClose();
-          }, 2000);
+          }, 3000);
         } else {
-          setSuccess('Successfully signed in!');
+          setSuccess('Successfully signed in! Redirecting...');
           setTimeout(() => {
             onClose();
-          }, 1000);
+          }, 1500);
         }
       }
     } catch (err) {
-      setError('An unexpected error occurred. Please try again.');
+      console.error('Auth modal error:', err);
+      setError('An unexpected error occurred. Please check your internet connection and try again.');
     } finally {
       setLoading(false);
     }
@@ -117,7 +129,7 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
 
         <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
 
-        <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+  <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg w-full max-w-sm">
           <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center">
@@ -126,10 +138,12 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
                 </div>
                 <div className="ml-4">
                   <h3 className="text-lg leading-6 font-medium text-gray-900">
-                    {isSignUp ? 'Create Account' : 'Sign In'}
+                    {reason === 'apply' ? (isSignUp ? 'Create Account to Track' : 'Sign In to Track') : (isSignUp ? 'Create Account' : 'Sign In')}
                   </h3>
                   <p className="text-sm text-gray-500">
-                    {isSignUp ? 'Join the GT CS internship community' : 'Welcome back to GT CS internships'}
+                    {reason === 'apply'
+                      ? 'Sign in to save and track your applications across devices'
+                      : (isSignUp ? 'Join the GT CS internship community' : 'Welcome back to GT CS internships')}
                   </p>
                 </div>
               </div>
@@ -166,7 +180,7 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
                     id="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    className={`block w-full pl-10 pr-3 py-2 border rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:border-transparent ${
+                    className={`block w-full pl-10 pr-3 py-3 border rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:border-transparent min-h-[44px] touch-manipulation ${
                       validationErrors.email ? 'border-red-300' : 'border-gray-300'
                     }`}
                     placeholder="your.email@gatech.edu"
@@ -189,7 +203,7 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
                     id="password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className={`block w-full pl-10 pr-3 py-2 border rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:border-transparent ${
+                    className={`block w-full pl-10 pr-3 py-3 border rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:border-transparent min-h-[44px] touch-manipulation ${
                       validationErrors.password ? 'border-red-300' : 'border-gray-300'
                     }`}
                     placeholder="••••••••"
@@ -213,7 +227,7 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
                       id="confirmPassword"
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
-                      className={`block w-full pl-10 pr-3 py-2 border rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:border-transparent ${
+                      className={`block w-full pl-10 pr-3 py-3 border rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:border-transparent min-h-[44px] touch-manipulation ${
                         validationErrors.confirmPassword ? 'border-red-300' : 'border-gray-300'
                       }`}
                       placeholder="••••••••"
@@ -241,7 +255,7 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
               <button
                 type="submit"
                 disabled={loading || success !== ''}
-                className="w-full flex justify-center items-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-yellow-600 hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                className="w-full flex justify-center items-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-yellow-600 hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors min-h-[44px] touch-manipulation"
               >
                 {loading ? (
                   <>
@@ -261,6 +275,38 @@ export function AuthModal({ isOpen, onClose }: AuthModalProps) {
                 )}
               </button>
             </form>
+
+            {/* Guest apply option when opened from Apply flow */}
+            {reason === 'apply' && (
+              <div className="mt-4 border-t border-gray-200 pt-4">
+                <div className="mb-2 text-sm text-gray-700 font-medium">Just browsing?</div>
+                <p className="text-xs text-gray-600 mb-3">
+                  Continue as a guest to apply without creating an account. You won't be able to track your applications
+                  across sessions or devices. Sign in to save, set statuses, and view analytics.
+                </p>
+                <div className="flex items-center justify-between flex-col sm:flex-row gap-3">
+                  <label className="inline-flex items-center text-xs text-gray-600">
+                    <input
+                      type="checkbox"
+                      className="mr-2 rounded border-gray-300"
+                      checked={dontAskAgain}
+                      onChange={(e) => setDontAskAgain(e.target.checked)}
+                    />
+                    Don't ask me again
+                  </label>
+                  <button
+                    onClick={() => {
+                      if (dontAskAgain) setGuestApplyPreference(true);
+                      onContinueAsGuest?.(dontAskAgain);
+                      onClose();
+                    }}
+                    className="w-full sm:w-auto inline-flex items-center justify-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium bg-white text-gray-700 hover:bg-gray-50"
+                  >
+                    Continue as guest
+                  </button>
+                </div>
+              </div>
+            )}
 
             {isSignUp && (
               <div className="mt-4 p-3 bg-blue-50 rounded-md">

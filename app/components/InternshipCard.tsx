@@ -2,6 +2,8 @@ import React from 'react';
 import { MapPin, Calendar, ExternalLink, Building2, GraduationCap, Flag, Shield, Lock, Sparkles } from 'lucide-react';
 import type { Internship } from '../types';
 import { useAuth, useIsSaved, useSavedInternships } from '../lib/hooks';
+import { getGuestApplyPreference } from '../lib/auth-utils';
+import { useToast } from './toast/ToastProvider';
 
 interface InternshipCardProps {
   internship: Internship;
@@ -38,6 +40,7 @@ export function InternshipCard({ internship, isEven }: InternshipCardProps) {
   const { saveInternship, unsaveInternship } = useSavedInternships();
   const { isSaved } = useIsSaved(internship.id);
   const isNew = isNewInternship(internship.created_at);
+  const { show } = useToast();
 
   const handleSaveToggle = async () => {
     if (!user) return;
@@ -50,18 +53,42 @@ export function InternshipCard({ internship, isEven }: InternshipCardProps) {
   };
 
   const handleApplyClick = async () => {
-    if (!user || !internship.application_link || internship.is_closed) return;
-    
-    // If not already saved, save the internship first
-    if (!isSaved) {
-      await saveInternship(internship.id, 'Applied via GT Internship Portal');
+    if (!internship.application_link || internship.is_closed) return;
+
+    if (user) {
+      // If not already saved, save the internship first
+      try {
+        if (!isSaved) {
+          await saveInternship(internship.id, 'Applied via GT Internship Portal');
+        }
+      } catch (e) {
+        // ignore and proceed
+      }
+      // Route through tracking page which marks applied and records click
+      window.location.href = `/apply/${internship.id}`;
+    } else {
+      // Not logged in: respect guest preference or prompt to sign in
+      const guestMode = getGuestApplyPreference();
+      if (guestMode) {
+        window.open(internship.application_link, '_blank');
+        return;
+      }
+      try {
+        const firstShownKey = 'gt_guest_info_toast_shown';
+        const shown = typeof window !== 'undefined' ? localStorage.getItem(firstShownKey) : 'true';
+        if (!shown || shown !== 'true') {
+          show('Sign in to save and track your applications. Continue as guest to skip sign-in.', 'info');
+          if (typeof window !== 'undefined') localStorage.setItem(firstShownKey, 'true');
+        }
+      } catch {}
+      const onContinueAsGuest = () => {
+        window.open(internship.application_link!, '_blank');
+      };
+      const event = new CustomEvent('open-auth-modal', {
+        detail: { reason: 'apply', onContinueAsGuest },
+      });
+      window.dispatchEvent(event);
     }
-    
-    // Open the application link
-    window.open(internship.application_link, '_blank');
-    
-    // Here we could also update status to 'applied' but we'll let the user do that manually
-    // This allows flexibility in case they just want to view the application first
   };
 
   return (

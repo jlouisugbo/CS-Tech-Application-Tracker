@@ -1,38 +1,86 @@
+"use client"
+
 import { useState, useEffect } from 'react'
 import { supabase } from './supabaseClient'
+import { refreshSessionIfNeeded, enableAuthDebugging } from './auth-utils'
 import type { Internship, User, SavedInternship, FilterState } from '../types'
+
+// Location alias map for smart filtering (matches backend normalization)
+const LOCATION_ALIASES: Record<string, string> = {
+  'nyc': 'New York, NY',
+  'new york': 'New York, NY',
+  'new york city': 'New York, NY',
+  'manhattan': 'New York, NY',
+  'brooklyn': 'New York, NY',
+  'sf': 'San Francisco, CA',
+  'san francisco': 'San Francisco, CA',
+  'san fran': 'San Francisco, CA',
+  'bay area': 'San Francisco Bay Area, CA',
+  'silicon valley': 'San Francisco Bay Area, CA',
+  'la': 'Los Angeles, CA',
+  'los angeles': 'Los Angeles, CA',
+  'dc': 'Washington, DC',
+  'washington dc': 'Washington, DC',
+  'remote': 'Remote',
+  'remote in usa': 'Remote',
+  'remote us': 'Remote',
+  'wfh': 'Remote',
+};
+
+function normalizeLocation(location: string): string {
+  if (!location) return 'Remote';
+  const normalized = location.toLowerCase().trim();
+  return LOCATION_ALIASES[normalized] || location.trim();
+}
 
 // Hook for fetching internships with filters
 export function useInternships(filters: FilterState) {
   const [internships, setInternships] = useState<Internship[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [retryCount, setRetryCount] = useState(0)
 
-  useEffect(() => {
-    const fetchInternships = async () => {
-      try {
-        setLoading(true)
+  const fetchInternships = async (isRetry = false) => {
+    try {
+      setLoading(true)
+      if (!isRetry) {
         setError(null)
+        setRetryCount(0)
+      }
 
-        // Fetch from API endpoint (bypasses RLS issues with direct Supabase access)
-        console.log('🔍 Fetching internships from API endpoint...')
-        const response = await fetch('/api/internships')
-        
-        let filtered: any[] = []
-        
-        if (!response.ok) {
-          console.error('❌ API request failed:', response.status, response.statusText)
-          throw new Error(`Failed to fetch internships: ${response.status} ${response.statusText}`)
+      // Fetch from API endpoint (bypasses RLS issues with direct Supabase access)
+      console.log('🔍 Fetching internships from API endpoint...')
+      const response = await fetch('/api/internships', {
+        cache: 'no-store', // Ensure fresh data on retry
+      })
+
+      let filtered: any[] = []
+
+      if (!response.ok) {
+        console.error('❌ API request failed:', response.status, response.statusText)
+
+        // Provide more specific error messages based on status codes
+        if (response.status === 503 || response.status === 502) {
+          throw new Error('Server is temporarily unavailable. Please try again in a moment.')
+        } else if (response.status === 404) {
+          throw new Error('Internships service not found. Please contact support.')
+        } else if (response.status >= 500) {
+          throw new Error('Server error occurred. Please try again or contact support if the problem persists.')
+        } else if (response.status === 429) {
+          throw new Error('Too many requests. Please wait a moment before trying again.')
         } else {
-          const result = await response.json()
-          if (result.internships) {
-            console.log(`✅ Successfully loaded ${result.internships.length} internships from API`)
-            filtered = result.internships
-          } else {
-            console.error('❌ No internships found in API response')
-            filtered = []
-          }
+          throw new Error(`Unable to load internships (Error ${response.status}). Please try again.`)
         }
+      } else {
+        const result = await response.json()
+        if (result.internships) {
+          console.log(`✅ Successfully loaded ${result.internships.length} internships from API`)
+          filtered = result.internships
+        } else {
+          console.error('❌ No internships found in API response')
+          filtered = []
+        }
+      }
 
         // Apply client-side filters
         if (filters.category && filters.category !== 'All') {
@@ -52,8 +100,20 @@ export function useInternships(filters: FilterState) {
         }
 
         if (filters.location && filters.location !== 'All') {
-          filtered = filtered.filter(i => 
-            i.locations.some((loc: string) => loc.toLowerCase().includes(filters.location.toLowerCase()))
+          const searchTerm = normalizeLocation(filters.location);
+
+          filtered = filtered.filter(i =>
+            i.locations.some((loc: string) => {
+              const normalizedLocation = normalizeLocation(loc);
+
+              // Exact match (preferred)
+              if (normalizedLocation === searchTerm) {
+                return true;
+              }
+
+              // Partial match for flexibility
+              return normalizedLocation.toLowerCase().includes(searchTerm.toLowerCase());
+            })
           )
         }
 
@@ -95,30 +155,47 @@ export function useInternships(filters: FilterState) {
         });
 
         setInternships(filtered);
+        setError(null); // Clear any previous errors on success
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to fetch internships');
+        const errorMessage = err instanceof Error ? err.message : 'Failed to fetch internships'
+        console.error('Error in fetchInternships:', errorMessage)
+        setError(errorMessage);
         setInternships([]);
+
+        // Increment retry count for potential retry functionality
+        if (isRetry) {
+          setRetryCount(prev => prev + 1)
+        }
       } finally {
         setLoading(false);
       }
     }
 
-    // Simulate network delay
-    setTimeout(fetchInternships, 300)
-  }, [
-    filters.category,
-    filters.location,
-    filters.citizenship, 
-    filters.sponsorship,
-    filters.freshman_friendly,
-    filters.company,
-    filters.date_posted,
-    filters.sort_by,
-    filters.view_mode
-    // Note: company_sort_by is only used in CompanyGroupView, not here
-  ])
+    useEffect(() => {
+      // Add slight delay to prevent excessive API calls during rapid filter changes
+      const timeoutId = setTimeout(() => {
+        fetchInternships()
+      }, 300)
 
-  return { internships, loading, error, refetch: () => {} }
+      return () => clearTimeout(timeoutId)
+    }, [
+      filters.category,
+      filters.location,
+      filters.citizenship,
+      filters.sponsorship,
+      filters.freshman_friendly,
+      filters.company,
+      filters.date_posted,
+      filters.sort_by,
+      filters.view_mode
+      // Note: company_sort_by is only used in CompanyGroupView, not here
+    ])
+
+  const retry = () => {
+    fetchInternships(true)
+  }
+
+  return { internships, loading, error, retry, retryCount }
 }
 
 // Hook for authentication
@@ -126,17 +203,99 @@ export function useAuth() {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
   const [initializing, setInitializing] = useState(true)
+  const [sessionError, setSessionError] = useState<string | null>(null)
+
+  // Helper function to handle user profile creation/retrieval
+  const handleUserProfile = async (sessionUser: any): Promise<User | null> => {
+    try {
+      // First try to fetch existing profile
+      let { data: profile, error: profileError } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', sessionUser.id)
+        .single()
+
+      // If profile doesn't exist, create it
+      if (profileError && profileError.code === 'PGRST116') {
+        console.log('Creating new user profile for:', sessionUser.email)
+        const { data: newProfile, error: createError } = await supabase
+          .from('users')
+          .insert({
+            id: sessionUser.id,
+            email: sessionUser.email,
+            full_name: sessionUser.user_metadata?.full_name || sessionUser.email?.split('@')[0]
+          })
+          .select()
+          .single()
+
+        if (!createError && newProfile) {
+          profile = newProfile
+        } else {
+          console.error('Error creating user profile:', createError)
+          // Fall back to basic user object if profile creation fails
+          return {
+            id: sessionUser.id,
+            email: sessionUser.email,
+            full_name: sessionUser.email?.split('@')[0],
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            needs_sponsorship: false,
+            is_us_citizen: true
+          } as User
+        }
+      } else if (profileError) {
+        console.error('Error fetching user profile:', profileError)
+        // Fall back to basic user object if profile fetch fails
+        return {
+          id: sessionUser.id,
+          email: sessionUser.email,
+          full_name: sessionUser.email?.split('@')[0],
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          needs_sponsorship: false,
+          is_us_citizen: true
+        } as User
+      }
+
+      return profile
+    } catch (error) {
+      console.error('Error handling user profile:', error)
+      // Return basic user object as fallback
+      return {
+        id: sessionUser.id,
+        email: sessionUser.email,
+        full_name: sessionUser.email?.split('@')[0],
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        needs_sponsorship: false,
+        is_us_citizen: true
+      } as User
+    }
+  }
 
   useEffect(() => {
     let isMounted = true
 
-    // Get initial session
-    const getSession = async () => {
+    // Get initial session with timeout to prevent infinite loading
+    const initializeAuth = async () => {
       try {
+        console.log('🔐 Initializing authentication...')
+
+        // Set a timeout to ensure loading state clears
+        const timeoutId = setTimeout(() => {
+          if (isMounted) {
+            console.warn('⚠️ Auth initialization timeout - clearing loading state')
+            setLoading(false)
+            setInitializing(false)
+          }
+        }, 5000) // 5 second timeout
+
         const { data: { session }, error } = await supabase.auth.getSession()
-        
+
+        clearTimeout(timeoutId) // Clear timeout if we get a response
+
         if (error) {
-          console.error('Error getting session:', error)
+          console.error('❌ Error getting session:', error)
           if (isMounted) {
             setUser(null)
             setLoading(false)
@@ -146,40 +305,22 @@ export function useAuth() {
         }
 
         if (session?.user && isMounted) {
-          // Fetch or create user profile
-          let { data: profile, error: profileError } = await supabase
-            .from('users')
-            .select('*')
-            .eq('id', session.user.id)
-            .single()
-
-          // If profile doesn't exist, create it
-          if (profileError && profileError.code === 'PGRST116') {
-            const { data: newProfile, error: createError } = await supabase
-              .from('users')
-              .insert({
-                id: session.user.id,
-                email: session.user.email,
-                full_name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0]
-              })
-              .select()
-              .single()
-
-            if (!createError && newProfile) {
-              profile = newProfile
-            }
+          console.log('✅ Found existing session for:', session.user.email)
+          const userProfile = await handleUserProfile(session.user)
+          if (isMounted && userProfile) {
+            setUser(userProfile)
           }
-
-          if (profile && isMounted) {
-            setUser(profile)
+        } else {
+          console.log('ℹ️ No existing session found')
+          if (isMounted) {
+            setUser(null)
           }
-        } else if (isMounted) {
-          setUser(null)
         }
       } catch (error) {
-        console.error('Error in getSession:', error)
+        console.error('💥 Error initializing auth:', error)
         if (isMounted) {
           setUser(null)
+          setSessionError('Failed to initialize authentication. Please try refreshing the page.')
         }
       } finally {
         if (isMounted) {
@@ -189,83 +330,140 @@ export function useAuth() {
       }
     }
 
-    getSession()
+    initializeAuth()
+
+    // Enable auth debugging in development
+    if (process.env.NODE_ENV === 'development') {
+      enableAuthDebugging(true)
+    }
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        console.log('Auth state change:', event, session?.user?.email)
-        
+        console.log('🔄 Auth state change:', event, session?.user?.email)
+
         if (!isMounted) return
 
-        if (session?.user) {
-          // Fetch or create user profile
-          let { data: profile, error: profileError } = await supabase
-            .from('users')
-            .select('*')
-            .eq('id', session.user.id)
-            .single()
+        // Don't process initial session event since we handle that above
+        if (event === 'INITIAL_SESSION') return
 
-          // If profile doesn't exist, create it
-          if (profileError && profileError.code === 'PGRST116') {
-            const { data: newProfile, error: createError } = await supabase
-              .from('users')
-              .insert({
-                id: session.user.id,
-                email: session.user.email,
-                full_name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0]
-              })
-              .select()
-              .single()
+        setLoading(true)
+        setSessionError(null) // Clear previous errors
 
-            if (!createError && newProfile) {
-              profile = newProfile
+        try {
+          if (session?.user) {
+            const userProfile = await handleUserProfile(session.user)
+            if (isMounted && userProfile) {
+              setUser(userProfile)
+              console.log('✅ User authenticated:', userProfile.email)
+            }
+          } else {
+            if (isMounted) {
+              setUser(null)
+              // Handle different sign-out events
+              if (event === 'SIGNED_OUT') {
+                console.log('👋 User signed out')
+              } else if (event === 'TOKEN_REFRESHED') {
+                console.log('🔄 Token refreshed but session lost')
+                setSessionError('Your session has expired. Please sign in again.')
+              }
             }
           }
-
-          if (profile) {
-            setUser(profile)
+        } catch (error) {
+          console.error('Error in auth state change:', error)
+          if (isMounted) {
+            setUser(null)
+            setSessionError('Authentication error occurred. Please try signing in again.')
           }
-        } else {
-          setUser(null)
+        } finally {
+          if (isMounted) {
+            setLoading(false)
+          }
         }
-        
-        setLoading(false)
-        setInitializing(false)
       }
     )
+
+    // Handle tab visibility changes to refresh session
+    const handleVisibilityChange = async () => {
+      if (!document.hidden && user && isMounted) {
+        // Check if session is still valid when user returns to tab
+        try {
+          const { data: { session }, error } = await supabase.auth.getSession()
+          if (error || !session?.user) {
+            console.log('🔄 Session lost, signing out user')
+            setUser(null)
+            setSessionError('Your session has expired. Please sign in again.')
+          }
+        } catch (err) {
+          console.error('Session check error:', err)
+        }
+      }
+    }
+
+    // Add visibility change listener for better session management
+    if (typeof window !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibilityChange)
+    }
+
+    // Set up periodic session health checks
+    let sessionCheckInterval: NodeJS.Timeout
+    if (user && typeof window !== 'undefined') {
+      sessionCheckInterval = setInterval(async () => {
+        if (isMounted && user) {
+          const result = await refreshSessionIfNeeded()
+          if (!result.success) {
+            console.log('🔄 Periodic session check failed:', result.error)
+            // Don't automatically sign out on periodic checks to avoid disrupting user
+            // Only sign out if the session is completely invalid
+          }
+        }
+      }, 10 * 60 * 1000) // Check every 10 minutes
+    }
 
     return () => {
       isMounted = false
       subscription.unsubscribe()
+      if (typeof window !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibilityChange)
+      }
+      if (sessionCheckInterval) {
+        clearInterval(sessionCheckInterval)
+      }
     }
   }, [])
 
   const signIn = async (email: string, password: string) => {
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({ 
-        email, 
-        password 
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password
       })
-      
+
       if (error) {
         // Provide more user-friendly error messages
         if (error.message.includes('Invalid login credentials')) {
           return { error: { message: 'Invalid email or password. Please check your credentials and try again.' } }
+        } else if (error.message.includes('Email not confirmed')) {
+          return { error: { message: 'Please check your email and verify your account before signing in.' } }
+        } else if (error.message.includes('Too many requests')) {
+          return { error: { message: 'Too many sign-in attempts. Please wait a moment before trying again.' } }
+        } else if (error.message.includes('Network error')) {
+          return { error: { message: 'Network error. Please check your internet connection and try again.' } }
         }
         return { error }
       }
-      
+
       return { data, error: null }
     } catch (err) {
-      return { error: { message: 'An unexpected error occurred during sign in.' } }
+      console.error('Sign in error:', err)
+      return { error: { message: 'An unexpected error occurred during sign in. Please try again.' } }
     }
   }
 
   const signUp = async (email: string, password: string) => {
     try {
-      const { data, error } = await supabase.auth.signUp({ 
-        email, 
+      const { data, error } = await supabase.auth.signUp({
+        email,
         password,
         options: {
           emailRedirectTo: `${window.location.origin}/`,
@@ -274,43 +472,93 @@ export function useAuth() {
           }
         }
       })
-      
+
       if (error) {
         // Provide more user-friendly error messages
         if (error.message.includes('already registered')) {
           return { error: { message: 'An account with this email already exists. Please sign in instead.' } }
+        } else if (error.message.includes('Password should be at least')) {
+          return { error: { message: 'Password must be at least 6 characters long.' } }
+        } else if (error.message.includes('Invalid email')) {
+          return { error: { message: 'Please enter a valid email address.' } }
+        } else if (error.message.includes('Network error')) {
+          return { error: { message: 'Network error. Please check your internet connection and try again.' } }
         }
         return { error }
       }
-      
+
       return { data, error: null }
     } catch (err) {
-      return { error: { message: 'An unexpected error occurred during sign up.' } }
+      console.error('Sign up error:', err)
+      return { error: { message: 'An unexpected error occurred during sign up. Please try again.' } }
     }
   }
 
   const signOut = async () => {
     try {
+      // Clear user state immediately for better UX
+      setUser(null)
+
       const { error } = await supabase.auth.signOut()
-      
-      if (!error) {
-        // Clear user state immediately for better UX
-        setUser(null)
+
+      if (error) {
+        console.error('Sign out error:', error)
+        return { error: { message: 'An error occurred during sign out. You may need to clear your browser cookies.' } }
       }
-      
-      return { error }
+
+      // Force clear any remaining session data
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('supabase.auth.token')
+        sessionStorage.clear()
+      }
+
+      return { error: null }
     } catch (err) {
-      return { error: { message: 'An error occurred during sign out.' } }
+      console.error('Sign out error:', err)
+      return { error: { message: 'An error occurred during sign out. You may need to clear your browser cookies.' } }
     }
   }
 
-  return { 
-    user, 
-    loading, 
+  const clearSessionError = () => {
+    setSessionError(null)
+  }
+
+  // Helper function to check if session is valid
+  const isSessionValid = async () => {
+    try {
+      const { data: { session }, error } = await supabase.auth.getSession()
+      return !error && !!session?.user
+    } catch {
+      return false
+    }
+  }
+
+  // Helper function to refresh session
+  const refreshSession = async () => {
+    try {
+      const { data, error } = await supabase.auth.refreshSession()
+      if (error) {
+        console.error('Session refresh failed:', error)
+        return { error }
+      }
+      return { data, error: null }
+    } catch (err) {
+      console.error('Session refresh error:', err)
+      return { error: { message: 'Failed to refresh session' } }
+    }
+  }
+
+  return {
+    user,
+    loading,
     initializing,
-    signIn, 
-    signUp, 
-    signOut 
+    sessionError,
+    signIn,
+    signUp,
+    signOut,
+    clearSessionError,
+    isSessionValid,
+    refreshSession
   }
 }
 
@@ -599,16 +847,24 @@ export function useFilterOptions() {
   const [companies, setCompanies] = useState<string[]>(['All'])
   const [locations, setLocations] = useState<string[]>(['All'])
   const [datePosted, setDatePosted] = useState<string[]>(['All'])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     const fetchOptions = async () => {
       try {
-        const response = await fetch('/api/internships')
-        
+        setLoading(true)
+        setError(null)
+
+        const response = await fetch('/api/internships', {
+          cache: 'no-store',
+        })
+
         if (!response.ok) {
+          console.warn('Failed to fetch filter options, using defaults')
           return
         }
-        
+
         const result = await response.json()
         const data = result.internships || []
 
@@ -617,15 +873,19 @@ export function useFilterOptions() {
         const uniqueDates = new Set<string>()
 
         data.forEach((internship: any) => {
-          uniqueCompanies.add(internship.company)
-          
+          if (internship.company) {
+            uniqueCompanies.add(internship.company)
+          }
+
           internship.locations?.forEach((location: string) => {
-            if (location.trim() && !location.includes('locations')) {
+            if (location?.trim() && !location.toLowerCase().includes('locations')) {
               uniqueLocations.add(location.trim())
             }
           })
-          
-          uniqueDates.add(internship.date_posted)
+
+          if (internship.date_posted) {
+            uniqueDates.add(internship.date_posted)
+          }
         })
 
         setCompanies(['All', ...Array.from(uniqueCompanies).sort()])
@@ -633,11 +893,40 @@ export function useFilterOptions() {
         setDatePosted(['All', ...Array.from(uniqueDates).sort()])
       } catch (error) {
         console.error('Error fetching filter options:', error)
+        setError('Failed to load filter options')
+        // Keep default values on error
+      } finally {
+        setLoading(false)
       }
     }
 
-    fetchOptions()
+    // Add slight delay to prevent excessive API calls
+    const timeoutId = setTimeout(fetchOptions, 100)
+    return () => clearTimeout(timeoutId)
   }, [])
 
-  return { companies, locations, datePosted }
+  return { companies, locations, datePosted, loading, error }
+}
+
+// Hook to detect network connectivity
+export function useNetworkStatus() {
+  const [isOnline, setIsOnline] = useState(true)
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true)
+    const handleOffline = () => setIsOnline(false)
+
+    // Initial status
+    setIsOnline(navigator.onLine)
+
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [])
+
+  return isOnline
 }

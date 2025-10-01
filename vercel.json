@@ -2,8 +2,21 @@
   "functions": {
     "app/api/scrape/route.ts": {
       "maxDuration": 300
+    },
+    "app/api/notifications/weekly/route.ts": {
+      "maxDuration": 300
     }
   },
+  "crons": [
+    {
+      "path": "/api/scrape",
+      "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/notifications/weekly",
+      "schedule": "0 9 * * 5"
+    }
+  ],
   "regions": ["iad1"],
   "buildCommand": "npm run build"
 }

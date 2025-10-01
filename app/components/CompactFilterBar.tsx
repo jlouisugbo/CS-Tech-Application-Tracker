@@ -50,7 +50,7 @@ function SearchableSelect({ options, value, onChange, placeholder, icon, display
     <div className="relative">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center justify-between w-full px-3 py-2 text-sm border border-gray-300 rounded-md bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+        className="flex items-center justify-between w-full px-3 py-3 text-sm border border-gray-300 rounded-md bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[44px] touch-manipulation"
       >
         <div className="flex items-center space-x-2">
           {icon}
@@ -160,7 +160,7 @@ export function CompactFilterBar({
           <div className="flex items-center bg-gray-100 rounded-lg p-1">
             <button
               onClick={() => onFilterChange('view_mode', 'list')}
-              className={`flex items-center space-x-1 px-2 py-1 text-xs font-medium rounded transition-colors ${
+              className={`flex items-center space-x-1 px-3 py-2 text-xs font-medium rounded transition-colors touch-manipulation ${
                 filters.view_mode === 'list'
                   ? 'bg-white text-gray-900 shadow-sm'
                   : 'text-gray-600 hover:text-gray-900'
@@ -172,7 +172,7 @@ export function CompactFilterBar({
             
             <button
               onClick={() => onFilterChange('view_mode', 'grid')}
-              className={`flex items-center space-x-1 px-2 py-1 text-xs font-medium rounded transition-colors ${
+              className={`flex items-center space-x-1 px-3 py-2 text-xs font-medium rounded transition-colors touch-manipulation ${
                 filters.view_mode === 'grid'
                   ? 'bg-white text-gray-900 shadow-sm'
                   : 'text-gray-600 hover:text-gray-900'
@@ -184,7 +184,7 @@ export function CompactFilterBar({
             
             <button
               onClick={() => onFilterChange('view_mode', 'grouped')}
-              className={`flex items-center space-x-1 px-2 py-1 text-xs font-medium rounded transition-colors ${
+              className={`flex items-center space-x-1 px-3 py-2 text-xs font-medium rounded transition-colors touch-manipulation ${
                 filters.view_mode === 'grouped'
                   ? 'bg-white text-gray-900 shadow-sm'
                   : 'text-gray-600 hover:text-gray-900'
@@ -200,7 +200,7 @@ export function CompactFilterBar({
           {hasActiveFilters && (
             <button
               onClick={onClearFilters}
-              className="flex items-center space-x-1 px-2 py-1 text-xs text-red-600 hover:text-red-800 transition-colors"
+              className="flex items-center space-x-1 px-3 py-2 text-xs text-red-600 hover:text-red-800 transition-colors min-h-[44px] touch-manipulation"
             >
               <X className="h-3 w-3" />
               <span>Clear</span>
@@ -209,7 +209,7 @@ export function CompactFilterBar({
           
           <button
             onClick={() => setIsExpanded(!isExpanded)}
-            className="flex items-center space-x-1 px-2 py-1 text-xs text-gray-600 hover:text-gray-900 transition-colors"
+            className="flex items-center space-x-1 px-3 py-2 text-xs text-gray-600 hover:text-gray-900 transition-colors min-h-[44px] touch-manipulation"
           >
             <span>{isExpanded ? 'Less' : 'More'}</span>
             <ChevronDown className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
@@ -219,7 +219,7 @@ export function CompactFilterBar({
 
       {/* Quick Filters */}
       <div className="p-2 space-y-2">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
           {/* Category */}
           <SearchableSelect
             options={currentOptions.category}
@@ -277,14 +277,14 @@ export function CompactFilterBar({
       {/* Extended Filters */}
       {isExpanded && (
         <div className="border-t border-gray-200 p-2">
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
             {/* Citizenship */}
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">Citizenship</label>
               <select
                 value={filters.citizenship}
                 onChange={(e) => onFilterChange('citizenship', e.target.value)}
-                className="block w-full text-sm rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white"
+                className="block w-full text-sm rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white min-h-[44px] touch-manipulation"
               >
                 {Object.entries(citizenshipLabels).map(([key, label]) => (
                   <option key={key} value={key}>{label}</option>
@@ -298,7 +298,7 @@ export function CompactFilterBar({
               <select
                 value={filters.sponsorship}
                 onChange={(e) => onFilterChange('sponsorship', e.target.value)}
-                className="block w-full text-sm rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white"
+                className="block w-full text-sm rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white min-h-[44px] touch-manipulation"
               >
                 {Object.entries(sponsorshipLabels).map(([key, label]) => (
                   <option key={key} value={key}>{label}</option>
@@ -312,7 +312,7 @@ export function CompactFilterBar({
               <select
                 value={filters.date_posted}
                 onChange={(e) => onFilterChange('date_posted', e.target.value)}
-                className="block w-full text-sm rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white"
+                className="block w-full text-sm rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white min-h-[44px] touch-manipulation"
               >
                 {currentOptions.date_posted.map((option) => (
                   <option key={option} value={option}>{option}</option>

@@ -11,6 +11,9 @@ module.exports = {
         'gt-gold': '#B3A369',
         'gt-navy': '#003057',
       },
+      screens: {
+        'xs': '475px',
+      },
     },
   },
   plugins: [],
