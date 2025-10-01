@@ -77,16 +77,10 @@ export const CompactInternshipCard = memo(function CompactInternshipCard({ inter
 
   const handleApplyClick = async () => {
     if (!internship.application_link || internship.is_closed) return;
-    
-    // If the user is logged in, ensure it's saved and route through tracking page
+
+    // If the user is logged in, route through tracking page
     if (user) {
-      try {
-        if (!savedInternship && !isSaved) {
-          await saveInternship(internship.id, 'Applied via GT Internship Portal');
-        }
-      } catch (e) {
-        // Silent fail - we'll still navigate
-      }
+      // No need to save here - the apply page will handle saving if needed
       window.location.href = `/apply/${internship.id}`;
       return;
     }

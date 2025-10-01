@@ -5,21 +5,55 @@ import { useParams, useRouter } from 'next/navigation';
 import { ExternalLink, CheckCircle, Clock, ArrowLeft } from 'lucide-react';
 import { Header } from '../../components/Header';
 import { useAuth, useSavedInternships } from '../../lib/hooks';
-import type { SavedInternship } from '../../types';
+import type { SavedInternship, Internship } from '../../types';
+import { supabase } from '../../lib/supabaseClient';
 
 export default function ApplyPage() {
   const params = useParams();
   const router = useRouter();
   const { user } = useAuth();
-  const { savedInternships, updateApplicationStatus, markLinkClicked } = useSavedInternships();
+  const { savedInternships, updateApplicationStatus, markLinkClicked, saveInternship } = useSavedInternships();
   const [savedInternship, setSavedInternship] = useState<SavedInternship | null>(null);
+  const [internship, setInternship] = useState<Internship | null>(null);
+  const [loading, setLoading] = useState(true);
   const [countdown, setCountdown] = useState(5);
   const [userAction, setUserAction] = useState<'waiting' | 'confirmed' | 'cancelled'>('waiting');
 
   useEffect(() => {
-    const internshipId = params.id as string;
-    const saved = savedInternships.find(s => s.internship_id === internshipId);
-    setSavedInternship(saved || null);
+    const fetchInternship = async () => {
+      const internshipId = params.id as string;
+
+      // First check if it's in saved list
+      const saved = savedInternships.find(s => s.internship_id === internshipId);
+      if (saved) {
+        setSavedInternship(saved);
+        /* @ts-ignore */
+        setInternship(saved.internships);
+        setLoading(false);
+        return;
+      }
+
+      // If not saved, fetch from database
+      try {
+        const { data, error } = await supabase
+          .from('internships')
+          .select('*')
+          .eq('id', internshipId)
+          .single();
+
+        if (error) throw error;
+
+        if (data) {
+          setInternship(data);
+        }
+      } catch (error) {
+        console.error('Failed to fetch internship:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchInternship();
   }, [params.id, savedInternships]);
 
   useEffect(() => {
@@ -32,27 +66,47 @@ export default function ApplyPage() {
   }, [countdown, userAction]);
 
   const handleApply = async () => {
-    if (!savedInternship) return;
-    
+    if (!internship) return;
+
     setUserAction('confirmed');
-    
+
     try {
-      // Mark as applied and link clicked
-      await Promise.all([
-        updateApplicationStatus(savedInternship.internship_id, 'applied'),
-        markLinkClicked(savedInternship.id)
-      ]);
-      
+      // If not already saved, save it first
+      if (!savedInternship) {
+        await saveInternship(internship.id, 'Applied via GT Internship Portal');
+
+        // Wait a bit for the save to complete and update the hook state
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // Fetch the newly saved internship to get its ID
+        const newSaved = savedInternships.find(s => s.internship_id === internship.id);
+
+        if (newSaved) {
+          await Promise.all([
+            updateApplicationStatus(internship.id, 'applied'),
+            markLinkClicked(newSaved.id)
+          ]);
+        }
+      } else {
+        // Already saved, just update status and mark link clicked
+        await Promise.all([
+          updateApplicationStatus(savedInternship.internship_id, 'applied'),
+          markLinkClicked(savedInternship.id)
+        ]);
+      }
+
       // Open the application link
-      /* @ts-ignore */
-      if (savedInternship.internships?.application_link) {
-        /* @ts-ignore */
-        window.open(savedInternship.internships.application_link, '_blank');
+      if (internship.application_link) {
+        window.open(internship.application_link, '_blank');
       }
     } catch (error) {
       console.error('Failed to update application status:', error);
+      // Still open the link even if tracking fails
+      if (internship.application_link) {
+        window.open(internship.application_link, '_blank');
+      }
     }
-    
+
     // Redirect back to dashboard after a delay
     setTimeout(() => {
       router.push('/dashboard?tab=tracker');
@@ -80,7 +134,21 @@ export default function ApplyPage() {
     );
   }
 
-  if (!savedInternship) {
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <Header />
+        <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+            <p className="mt-4 text-sm text-gray-500">Loading internship...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!internship) {
     return (
       <div className="min-h-screen bg-gray-50">
         <Header />
@@ -88,7 +156,7 @@ export default function ApplyPage() {
           <div className="text-center">
             <h3 className="text-lg font-medium text-gray-900">Internship not found</h3>
             <p className="mt-2 text-sm text-gray-500">
-              This internship is not in your saved list.
+              This internship could not be found in our database.
             </p>
             <button
               onClick={() => router.push('/')}
@@ -124,25 +192,19 @@ export default function ApplyPage() {
               <div className="bg-gray-50 rounded-lg p-6 mb-8">
                 <div className="flex items-start space-x-4">
                   <div className="w-12 h-12 bg-gradient-to-br from-yellow-500 to-yellow-600 rounded-lg flex items-center justify-center">
-                    {/* @ts-ignore */}
-                    <span className="text-white font-bold text-lg">{savedInternship.internships?.company.charAt(0)}</span>
+                    <span className="text-white font-bold text-lg">{internship.company.charAt(0)}</span>
                   </div>
                   <div className="flex-1">
                     <h3 className="text-lg font-semibold text-gray-900">
-                      {/* @ts-ignore */}
-                      {savedInternship.internships?.role}
+                      {internship.role}
                     </h3>
                     <p className="text-sm text-gray-600">
-                      {/* @ts-ignore */}
-                      {savedInternship.internships?.company}
+                      {internship.company}
                     </p>
                     <div className="mt-2 flex items-center text-xs text-gray-500">
-                      {/* @ts-ignore */}
-                      <span>{savedInternship.internships?.category}</span>
-                      {/* @ts-ignore */}
+                      <span>{internship.category}</span>
                       <span className="mx-2">•</span>
-                      {/* @ts-ignore */}
-                      <span>{savedInternship.internships?.locations?.[0]}</span>
+                      <span>{internship.locations?.[0] || 'Multiple Locations'}</span>
                     </div>
                   </div>
                 </div>
