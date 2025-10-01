@@ -895,7 +895,13 @@ async function checkApplicationLinks(internships: any[]): Promise<any[]> {
   const batchSize = 20;
   const delay = 100;
   console.log(`🔍 Checking all ${internships.length} application links for status...`);
-  
+
+  // Companies that are known to block automated requests - trust GitHub emoji instead
+  const trustedCompanies = [
+    'google', 'meta', 'facebook', 'amazon', 'apple', 'microsoft',
+    'netflix', 'nvidia', 'tesla', 'openai', 'anthropic', 'spacex'
+  ];
+
   // Common phrases that indicate a job is closed/unavailable
   const closedJobIndicators = [
     "sorry, the job you're looking for isn't available",
@@ -919,12 +925,23 @@ async function checkApplicationLinks(internships: any[]): Promise<any[]> {
     "job not found",
     "position not available"
   ];
-  
+
   // Process in batches to avoid overwhelming servers
   for (let i = 0; i < internships.length; i += batchSize) {
     const batch = internships.slice(i, i + batchSize);
     const promises = batch.map(async (internship, batchIndex) => {
       if (!internship.application_link) return;
+
+      // For trusted companies, trust the GitHub emoji instead of aggressive link checking
+      const isTrustedCompany = trustedCompanies.some(trusted =>
+        internship.company.toLowerCase().includes(trusted)
+      );
+
+      if (isTrustedCompany) {
+        // Trust the is_closed flag from GitHub 🔒 emoji parsing
+        console.log(`✅ ${internship.company} - Trusted company, using GitHub status (is_closed: ${internship.is_closed})`);
+        return;
+      }
       
       try {
         await new Promise(resolve => setTimeout(resolve, batchIndex * delay));
@@ -1320,8 +1337,8 @@ function parseSimplifyJobRow(rowHtml: string, lastMainCompany: string): any | nu
     if (!company || !role || company.trim() === '' || role.trim() === '') {
       return null;
     }
-    
-    return {
+
+    const internship = {
       company: company.trim(),
       role: role.trim(),
       category,
@@ -1337,6 +1354,20 @@ function parseSimplifyJobRow(rowHtml: string, lastMainCompany: string): any | nu
       is_faang: isFaang,
       requires_advanced_degree: requiresAdvancedDegree
     };
+
+    // Debug logging for Google internships
+    if (company.toLowerCase().includes('google')) {
+      console.log(`🔍 GOOGLE PARSED:`, {
+        company: company.trim(),
+        role: role.trim(),
+        is_closed: isClosed,
+        has_application_link: !!applicationLink,
+        application_link: applicationLink,
+        locations: locations.length
+      });
+    }
+
+    return internship;
   } catch (error) {
     console.warn('Error parsing SimplifyJobs row:', error);
     return null;
