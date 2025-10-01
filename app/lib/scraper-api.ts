@@ -298,49 +298,68 @@ export async function runScraperAPI(): Promise<ScraperResult> {
       };
     });
     
+    // Deduplicate by ID (keep the first entry for each ID)
+    const seenIds = new Map<string, any>();
+    const uniqueIdInternships: any[] = [];
+    let duplicateCount = 0;
+
+    for (const internship of finalInternships) {
+      if (!seenIds.has(internship.id)) {
+        seenIds.set(internship.id, internship);
+        uniqueIdInternships.push(internship);
+      } else {
+        duplicateCount++;
+        console.log(`⚠️ Duplicate ID skipped: ${internship.id} (${internship.company} - ${internship.role})`);
+      }
+    }
+
+    if (duplicateCount > 0) {
+      console.log(`📊 Deduplication: Removed ${duplicateCount} duplicates (${finalInternships.length} → ${uniqueIdInternships.length} internships)`);
+    }
+
     // Track scraped unique keys for marking inactive
-    const scrapedKeys = new Set(finalInternships.map(i => i.id));
-    
+    const scrapedKeys = new Set(uniqueIdInternships.map(i => i.id));
+
     // Mark positions no longer on GitHub as inactive
     const toMarkInactive = (existingInternships || [])
       .filter(record => !scrapedKeys.has(record.id))
       .map(record => record.id);
-    
+
     if (toMarkInactive.length > 0) {
       console.log(`🔴 Marking ${toMarkInactive.length} positions as inactive...`);
       const { error: inactiveError } = await supabaseAdmin
         .from('internships')
         .update({ is_active: false })
         .in('id', toMarkInactive);
-      
+
       if (inactiveError) {
         console.warn('Warning: Could not mark inactive:', inactiveError.message);
       }
     }
-    
+
     // Upsert internships (insert new, update existing)
-    console.log(`💾 Upserting ${finalInternships.length} internships...`);
+    console.log(`💾 Upserting ${uniqueIdInternships.length} internships...`);
     const { error } = await supabaseAdmin
       .from('internships')
-      .upsert(finalInternships, { 
+      .upsert(uniqueIdInternships, {
         onConflict: 'id',
-        ignoreDuplicates: false 
+        ignoreDuplicates: false
       });
-    
+
     if (error) {
       throw new Error(`Database upsert failed: ${error.message}`);
     }
-    
+
     // Calculate stats
-    const added = finalInternships.filter(i => !existingMap.has(i.id)).length;
-    const updated = finalInternships.length - added;
-    
+    const added = uniqueIdInternships.filter(i => !existingIdMap.has(i.id)).length;
+    const updated = uniqueIdInternships.length - added;
+
     // Log the scrape run
     try {
       const { error: logError } = await supabaseAdmin.from('scrape_logs').insert({
         run_id: runId,
         status: 'success',
-        internships_found: finalInternships.length,
+        internships_found: uniqueIdInternships.length,
         internships_added: added,
         internships_updated: updated,
         completed_at: new Date().toISOString(),
@@ -359,16 +378,16 @@ export async function runScraperAPI(): Promise<ScraperResult> {
     }
     
     console.log(`✅ Scraper completed successfully!`);
-    console.log(`   📊 Total: ${finalInternships.length} internships`);
+    console.log(`   📊 Total: ${uniqueIdInternships.length} internships`);
     console.log(`   ✨ New: ${added}`);
     console.log(`   🔄 Updated: ${updated}`);
     console.log(`   🔴 Marked inactive: ${toMarkInactive.length}`);
-    
+
     return {
       success: true,
-      internshipsFound: finalInternships.length,
-      updated: 0,
-      added: finalInternships.length,
+      internshipsFound: uniqueIdInternships.length,
+      updated: updated,
+      added: added,
       sources: sources
     };
     
